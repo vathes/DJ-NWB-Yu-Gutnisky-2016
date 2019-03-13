@@ -8,17 +8,17 @@ from tqdm import tqdm
 import glob
 
 import datajoint as dj
-from pipeline import (reference, subject, acquisition, intracellular, behavior, stimulation, utilities)
+from pipeline import (reference, subject, acquisition, intracellular, behavior, stimulation, virus, utilities)
 
-path = os.path.join('.', 'data', 'data', 'L4FS_loose_seal_ION_cut')
-fname = 'JY1591AAAA.nwb'
-nwb = h5.File(os.path.join(path, fname), 'r')
+# path = os.path.join('.', 'data', 'data', 'VPM_silicon_probe')
+# fname = 'ANM186997_20130321.nwb'
+# nwb = h5.File(os.path.join(path, fname), 'r')
 
 path = os.path.join('.', 'data', 'data')
 fnames = np.hstack(glob.glob(os.path.join(dir_files[0], '*.nwb'))
                    for dir_files in os.walk(path) if len(dir_files[1]) == 0)
 for fname in fnames:
-    nwb = h5.File(os.path.join(path, fname), 'r')
+    nwb = h5.File(fname, 'r')
     subject_info = {c: nwb['general']['subject'][c].value.decode('UTF-8')
                     for c in ('subject_id', 'description', 'sex', 'species', 'weight', 'age', 'genotype')}
     # force subject_id to be lower-case for consistency
@@ -74,6 +74,8 @@ for fname in fnames:
     reference.Experimenter.insert(zip(experimenters), skip_duplicates = True)
     acquisition.ExperimentType.insert(zip(experiment_types), skip_duplicates=True)
 
+    sess_key = {'subject_id': subject_info["subject_id"], 'session_time': session_info["session_time"]}
+
     with acquisition.Session.connection.transaction:
         if session_info not in acquisition.Session.proj():
             acquisition.Session.insert1(session_info, ignore_extra_fields=True)
@@ -82,59 +84,6 @@ for fname in fnames:
             acquisition.Session.ExperimentType.insert((dict(session_info, experiment_type=k)
                                                        for k in experiment_types), ignore_extra_fields=True)
         print(f'\nCreating Session - Subject: {subject_info["subject_id"]} - Date: {session_info["session_time"]}')
-
-    # ==================== Trials ====================
-    trial_resp_options = [k.decode('UTF-8') for k in nwb['analysis']['trial_type_string'].value.flatten()][:-1]
-    sess_key = {'subject_id': subject_info["subject_id"], 'session_time': session_info["session_time"]}
-    # -- read trial-related info -- nwb['epochs'], nwb['analysis'], nwb['stimulus']['presentation'])
-    trials = dict(trial_names=[tr for tr in nwb['epochs']],
-                         trial_type=[v['description'].value.decode('UTF-8') for v in nwb['epochs'].values()],
-                         start_times=[v['start_time'].value for v in nwb['epochs'].values()],
-                         stop_times=[v['stop_time'].value for v in nwb['epochs'].values()],
-                         good_trials=nwb['analysis']['good_trials'].value,
-                         trial_response=nwb['analysis']['trial_type_mat'].value,
-                         pole_pos=nwb['stimulus']['presentation']['pole_pos']['timestamps'].value,
-                         pole_in_times=nwb['stimulus']['presentation']['pole_in']['timestamps'].value,
-                         pole_out_times=nwb['stimulus']['presentation']['pole_out']['timestamps'].value)
-
-    # form new key-values pair and insert key
-    trial_key = dict(sess_key, trial_counts=len(trials['trial_names']))
-
-    if trial_key not in acquisition.TrialSet.proj():
-        acquisition.TrialSet.insert1(trial_key, allow_direct_insert=True)
-        for idx, trial_id in tqdm(enumerate(trials['trial_names'])):
-            trial_id = int(re.search('\d+', trial_id).group())
-            trial_detail = dict(trial_id=trial_id,
-                                start_time=trials['start_times'][idx],
-                                stop_time=trials['stop_times'][idx],
-                                trial_is_good=True if trials['good_trials'].flatten()[idx] == 1 else False,
-                                trial_type=trials['trial_type'][idx],
-                                trial_stim_present=True if trials['trial_response'][idx, -1] == 1 else False,
-                                trial_response=trial_resp_options[np.where(trials['trial_response'][idx, :-1])[0][0]],
-                                pole_position=trials['pole_pos'][idx])
-            # insert
-            acquisition.TrialSet.Trial.insert1({**trial_key, **trial_detail}, ignore_extra_fields=True, skip_duplicates=True, allow_direct_insert=True)
-            # ======== Now add trial event timing to the EventTime part table ====
-            # -- events timing
-            lick_times = (nwb['acquisition']['timeseries']['lick_trace']['data'].value.flatten() *
-                     nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value.flatten())
-            lick_times = lick_times[lick_times != 0]
-            lick_times = lick_times[np.logical_and(lick_times > trial_detail['start_time'],
-                                                   lick_times < trial_detail['stop_time'])]
-            touch_times = (nwb['processing']['whisker']['BehavioralTimeSeries']['touch_onset_1']['data'].value.flatten() *
-                           nwb['processing']['whisker']['BehavioralTimeSeries']['touch_onset_1']['timestamps'].value.flatten())
-            touch_times = touch_times[touch_times != 0] * 1e-3  # convert ms -> s (behav data timestamps are in millisecond)
-            touch_times = touch_times[np.logical_and(touch_times > trial_detail['start_time'],
-                                                     touch_times < trial_detail['stop_time'])]
-            events = dict(trial_start=0,
-                          trial_stop=trial_detail['stop_time'] - trial_detail['start_time'],
-                          pole_in=trials['pole_in_times'][idx] - trial_detail['start_time'],
-                          pole_out=trials['pole_out_times'][idx] - trial_detail['start_time'],
-                          first_lick=lick_times[0] - trial_detail['start_time'] if lick_times.size else np.nan,
-                          first_touch=touch_times[0] - trial_detail['start_time'] if touch_times.size else np.nan)
-            acquisition.TrialSet.EventTime.insert((dict(trial_key, trial_event=k, event_time = v)
-                                                   for k, v in events.items()),
-                                                  ignore_extra_fields=True, allow_direct_insert=True)
 
     # ==================== Intracellular ====================
     # -- read data - intracellular_ephys
@@ -152,43 +101,114 @@ for fname in fnames:
     reference.BrainLocation.insert1(brain_location, skip_duplicates = True)
     # -- ActionLocation
     action_location = dict(brain_location,
-                           coordinate_ref = 'bregma',  # hardcoded here
-                           coordinate_ap = round(Decimal(coord_ap_ml_dv[0]), 2),
-                           coordinate_ml = round(Decimal(coord_ap_ml_dv[1]), 2),
-                           coordinate_dv = round(Decimal(coord_ap_ml_dv[2]), 2))
+                           coordinate_ref='bregma',  # hardcoded here
+                           coordinate_ap=round(Decimal(coord_ap_ml_dv[0]), 2),
+                           coordinate_ml=round(Decimal(coord_ap_ml_dv[1]), 2),
+                           coordinate_dv=round(Decimal(coord_ap_ml_dv[2]) * Decimal('1e-3'), 2))
     reference.ActionLocation.insert1(action_location, skip_duplicates = True)
 
     # -- Whole Cell Device
     reference.WholeCellDevice.insert1({'device_name': ie_info['device']}, skip_duplicates=True)
-    # -- Cell
+    # -- Cell - there should only be 1 unit for whole-cell recording
     unit = nwb['processing']['spike_times']['UnitTimes']['unit_list'].value[0].decode('UTF-8')
-    cell_key = dict({**subject_info, **session_info, **action_location},
+    cell_key = dict({**sess_key, **action_location},
                     cell_id = os.path.split(fname)[-1].replace('.nwb', ''),
                     cell_type = nwb['processing']['spike_times']['UnitTimes'][unit]['unit_description'].value.decode('UTF-8'),
                     device_name = ie_info['device'])
-    if cell_key not in intracellular.Cell.proj():
-        intracellular.Cell.insert1(cell_key, ignore_extra_fields = True)
 
-    intracellular.MembranePotential.insert1(dict(
-        cell_key,
-        membrane_potential=nwb['acquisition']['timeseries']['membrane_potential']['data'].value,
-        membrane_potential_timestamps=nwb['acquisition']['timeseries']['membrane_potential']['timestamps'].value))
+    with intracellular.Cell.connection.transaction:
+        if cell_key not in intracellular.Cell.proj():
+            intracellular.Cell.insert1(cell_key, ignore_extra_fields=True)
 
-    intracellular.CurrentInjection.insert1(dict(
-        cell_key,
-        current_injection=nwb['acquisition']['timeseries']['current']['data'].value,
-        current_injection_timestamps=nwb['acquisition']['timeseries']['current']['timestamps'].value))
+            # determine if it is 'membrane_potential' or 'juxta_potential'
+            for f in nwb['acquisition']['timeseries']:
+                if re.search('potential', f):
+                    Vm_field = f
+                    break
 
-    intracellular.UnitSpikeTimes.insert1(dict(
-        cell_key,
-        unit_id=int(re.search('\d+', unit).group()),
-        spike_times=nwb['processing']['spike_times']['UnitTimes'][unit]['times'].value))
+            # shifting acquisition timestamps to 0 (if needed) - to synchronize with behavioral timestamps and trial times
+            acq_tstart = nwb['acquisition']['timeseries'][Vm_field]['timestamps'].value[0]
+
+            intracellular.MembranePotential.insert1(dict(
+                cell_key,
+                membrane_potential=nwb['acquisition']['timeseries'][Vm_field]['data'].value,
+                membrane_potential_timestamps=nwb['acquisition']['timeseries'][Vm_field]['timestamps'].value - acq_tstart),
+                ignore_extra_fields=True, allow_direct_insert=True, skip_duplicates=True)
+
+            intracellular.CurrentInjection.insert1(dict(
+                cell_key,
+                current_injection=nwb['acquisition']['timeseries']['current']['data'].value,
+                current_injection_timestamps=nwb['acquisition']['timeseries']['current']['timestamps'].value - acq_tstart),
+                ignore_extra_fields = True, allow_direct_insert = True, skip_duplicates=True)
+
+            intracellular.UnitSpikeTimes.insert1(dict(
+                cell_key,
+                unit_id=int(re.search('\d+', unit).group()),
+                spike_times=nwb['processing']['spike_times']['UnitTimes'][unit]['times'].value),
+                ignore_extra_fields = True, allow_direct_insert = True, skip_duplicates=True)
+
+            print('Ingest intracellular data')
+
+    # ==================== Trials ====================
+    trial_resp_options = [k.decode('UTF-8') for k in nwb['analysis']['trial_type_string'].value.flatten()][:-1]
+    # -- read trial-related info -- nwb['epochs'], nwb['analysis'], nwb['stimulus']['presentation'])
+    trials = dict(trial_names=[tr for tr in nwb['epochs']],
+                         trial_type=[v['description'].value.decode('UTF-8') for v in nwb['epochs'].values()],
+                         start_times=[v['start_time'].value for v in nwb['epochs'].values()],
+                         stop_times=[v['stop_time'].value for v in nwb['epochs'].values()],
+                         good_trials=nwb['analysis']['good_trials'].value,
+                         trial_response=nwb['analysis']['trial_type_mat'].value,
+                         pole_pos_time=nwb['stimulus']['presentation']['pole_pos']['timestamps'].value,
+                         pole_pos=nwb['stimulus']['presentation']['pole_pos']['data'].value,
+                         pole_in_times=nwb['stimulus']['presentation']['pole_in']['timestamps'].value,
+                         pole_out_times=nwb['stimulus']['presentation']['pole_out']['timestamps'].value)
+
+    lick_times = (nwb['acquisition']['timeseries']['lick_trace']['data'].value *
+                  (nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value - acq_tstart))
+    lick_times = lick_times[lick_times != 0]
+    touch_times = (nwb['processing']['whisker']['BehavioralTimeSeries']['touch_onset_1']['data'].value.flatten() *
+                   nwb['processing']['whisker']['BehavioralTimeSeries']['touch_onset_1']['timestamps'].value.flatten())
+    touch_times = touch_times[touch_times != 0] * 1e-3  # convert ms -> s (behav data timestamps are in millisecond)
+
+    # form new key-values pair and insert key
+    trial_set = dict(sess_key, trial_counts=len(trials['trial_names']))
+    if trial_set not in acquisition.TrialSet.proj():
+        print(f'Ingest trial information')
+        acquisition.TrialSet.insert1(trial_set, allow_direct_insert=True)
+        for idx, trial_id in tqdm(enumerate(trials['trial_names'])):
+            trial_key = dict(trial_set, trial_id=int(re.search('\d+', trial_id).group()))
+            trial_detail = dict(start_time=trials['start_times'][idx],
+                                stop_time=trials['stop_times'][idx],
+                                trial_is_good=True if trials['good_trials'].flatten()[idx] == 1 else False,
+                                trial_type=trials['trial_type'][idx],
+                                trial_stim_present=True if trials['trial_response'][idx, -1] == 1 else False,
+                                trial_response=trial_resp_options[np.where(trials['trial_response'][idx, :-1])[0][0]],
+                                pole_position=trials['pole_pos'][idx])
+            # insert
+            acquisition.TrialSet.Trial.insert1({**trial_key, **trial_detail}, ignore_extra_fields=True, skip_duplicates=True, allow_direct_insert=True)
+            # ======== Now add trial event timing to the EventTime part table ====
+            # -- events timing
+            trial_lick_times = lick_times[np.logical_and(lick_times > trial_detail['start_time'],
+                                                   lick_times < trial_detail['stop_time'])]
+            trial_touch_times = touch_times[np.logical_and(touch_times > trial_detail['start_time'],
+                                                     touch_times < trial_detail['stop_time'])]
+            events = dict(trial_start=0,
+                          trial_stop=trial_detail['stop_time'] - trial_detail['start_time'],
+                          pole_in=trials['pole_in_times'][idx] - trial_detail['start_time'],
+                          pole_out=trials['pole_out_times'][idx] - trial_detail['start_time'],
+                          pole_pos=trials['pole_pos_time'][idx] - trial_detail['start_time'],
+                          first_lick=trial_lick_times[0] - trial_detail['start_time'] if trial_lick_times.size else np.nan,
+                          first_touch=trial_touch_times[0] - trial_detail['start_time'] if trial_touch_times.size else np.nan)
+            acquisition.TrialSet.EventTime.insert((dict(trial_key, trial_event=k, event_time = v)
+                                                   for k, v in events.items()),
+                                                  ignore_extra_fields=True, allow_direct_insert=True)
 
     # ==================== Behavior ====================
     behavior.LickTrace.insert1(dict(
         sess_key,
         lick_trace=nwb['acquisition']['timeseries']['lick_trace']['data'].value,
-        lick_trace_timestamps=nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value))
+        lick_trace_timestamps=nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value - acq_tstart),
+        skip_duplicates=True, allow_direct_insert=True)
 
     whisker_timeseries = nwb['processing']['whisker']['BehavioralTimeSeries']
     for whisker_config, whisker_num in zip(nwb['general']['whisker_configuration'].value,
@@ -196,12 +216,14 @@ for fname in fnames:
         behavior.Whisker.insert1(dict(
             sess_key,
             whisker_config=whisker_config.decode('UTF-8'),
-            distance_to_pole=whisker_timeseries['distance_to_pole_' + whisker_num]['data'].value,
-            touch_offset=whisker_timeseries['touch_offset_' + whisker_num]['data'].value,
-            touch_onset=whisker_timeseries['touch_onset_' + whisker_num]['data'].value,
-            whisker_angle=whisker_timeseries['whisker_angle_' + whisker_num]['data'].value,
-            whisker_curvature=whisker_timeseries['whisker_curvature_' + whisker_num]['data'].value,
-            behavior_timestamps=whisker_timeseries['distance_to_pole_' + whisker_num]['timestamps'].value))
+            distance_to_pole=whisker_timeseries['distance_to_pole_' + whisker_num]['data'].value.flatten(),
+            touch_offset=whisker_timeseries['touch_offset_' + whisker_num]['data'].value.flatten(),
+            touch_onset=whisker_timeseries['touch_onset_' + whisker_num]['data'].value.flatten(),
+            whisker_angle=whisker_timeseries['whisker_angle_' + whisker_num]['data'].value.flatten(),
+            whisker_curvature=whisker_timeseries['whisker_curvature_' + whisker_num]['data'].value.flatten(),
+            behavior_timestamps=whisker_timeseries['distance_to_pole_' + whisker_num]['timestamps'].value),
+            skip_duplicates=True, allow_direct_insert=True)
+        print(f'Ingest whisker data: {whisker_config.decode("UTF-8")}')
 
     # ==================== Photo stimulation ====================
     for site in nwb['general']['optogenetics']:
@@ -230,7 +252,7 @@ for fname in fnames:
 
         # -- Device
         stim_device = nwb['general']['optogenetics'][site]['device'].value.decode('UTF-8')
-        stimulation.PhotoStimDevice.insert1({'device_name': stim_device, 'device_desc': device_desc}, skip_duplicates=True)
+        stimulation.PhotoStimDevice.insert1({'device_name': stim_device}, skip_duplicates=True)
 
         # -- PhotoStimulationProtocol
         photim_stim_protocol = dict(protocol=re.search('\d+', site).group(),
@@ -256,5 +278,32 @@ for fname in fnames:
                                                       photostim_timeseries=photostim_data,
                                                       photostim_timestamps=photostim_timestamps),
                                                  ignore_extra_fields = True)
+            print(f'Ingest photostim: {site}')
 
+    # ==================== Virus ====================
+    virus_desc_pattern = re.compile(r'virusSource: (?P<virus_source>.*); virusID: (?P<virus_id>.*); virusLotNumber: (?P<virus_lot_num>.*); inflectionCoordinates: (?P<injection_coord>.*); infectionLocation: (?P<injection_loc>.*); virusTiter: (?P<virus_titer>.*); injectionVolume: (?P<injection_volume>.*); injectionDate: (?P<injection_date>.*);(.+)')
+    match = virus_desc_pattern.match(nwb['general']['virus'].value.decode('UTF-8'))
 
+    # ==================== Virus ====================
+    if match and match['virus_id']:
+        virus_info = dict(
+            virus_source=match['virus_source'],
+            virus=match['virus_id'],
+            virus_lot_number=match['virus_lot_num'],
+            virus_titer=float(match['virus_titer']))
+
+        virus.Virus.insert1(virus_info, skip_duplicates=True)
+
+        brain_location = {'brain_region': match['injection_loc'],
+                          'brain_subregion': match['injection_coord'].split(' ')[0],
+                          'cortical_layer': 'N/A',
+                          'hemisphere': hemisphere}
+        reference.BrainLocation.insert1(brain_location, skip_duplicates=True)
+
+        virus.VirusInjection.insert1(dict({**virus_info, **subject_info, **brain_location},
+                                          coordinate_ref='bregma',
+                                          injection_date=utilities.parse_date(
+                                              re.search('(\d{4})-(\d{2})-(\d{2})', match['injection_date']).group()),
+                                          injection_volume=round(Decimal(re.match('\d+', match['injection_volume']).group()), 2)),
+                                     ignore_extra_fields=True, skip_duplicates=True)
+        print('Ingest virus injection')

@@ -144,10 +144,10 @@ class ExperimentalEvent(dj.Lookup):
     description: varchar(256)    
     """
     contents = zip(['trial_start', 'trial_stop', 'pole_in', 'pole_out',
-                    'first_touch', 'first_lick'],
+                    'pole_pos', 'first_touch', 'first_lick'],
                    ['trial start time', 'trial end time',
                     'onset of pole moving in', 'onset of pole moving out',
-                    'time of first whisker touch', 'time of first lick'])
+                    'time of recorded pole_position', 'time of first whisker touch', 'time of first lick'])
 
     
 @schema
@@ -155,7 +155,11 @@ class TrialType(dj.Lookup):
     definition = """ # The experimental type of this trial, e.g. Lick Left vs Lick Right
     trial_type: varchar(32)
     """
-    contents = zip(['Go', 'Nogo', 'GoStim_5ms_pulse', 'NogoStim_5ms_pulse', 'NogoStim_shift', 'N/A'])
+    contents = zip(['Go', 'Nogo',
+                    'GoStim_5ms_pulse', 'NogoStim_5ms_pulse',
+                    'GoStim_constant', 'NogoStim_constant',
+                    'GoStim_shift', 'NogoStim_shift',
+                    'N/A'])
     
     
 @schema
