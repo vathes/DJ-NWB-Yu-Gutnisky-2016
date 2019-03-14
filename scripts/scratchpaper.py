@@ -90,8 +90,17 @@ cell_key = dict({**subject_info, **session_info, **action_location},
                 device_name = ie_device)
 
 
+for idx, fname in enumerate(fnames):
+    print(idx)
+    nwb = h5.File(fname, 'r')
+    trial_type=[v['description'].value.decode('UTF-8') for v in nwb['epochs'].values()]
+    print(set(trial_type))
 
-
-
-
-
+fname = fnames[53]
+nwb = h5.File(fname, 'r')
+trial_type = [v['description'].value.decode('UTF-8') for v in nwb['epochs'].values()]
+print(set(trial_type))
+photostim_data1 = nwb['stimulus']['presentation']['photostimulus_1']['data'].value
+plt.plot(photostim_data1)
+photostim_data2 = nwb['stimulus']['presentation']['photostimulus_2']['data'].value
+plt.plot(photostim_data2)

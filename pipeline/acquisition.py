@@ -28,6 +28,7 @@ class Session(dj.Manual):
     definition = """
     -> subject.Subject
     session_time: datetime    # session time
+    session_id: varchar(32)
     ---
     session_directory = "": varchar(256)
     session_note = "": varchar(256) 

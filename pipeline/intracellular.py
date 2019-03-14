@@ -28,7 +28,6 @@ class CellType(dj.Lookup):
 class Cell(dj.Manual):
     definition = """ # A cell undergone intracellular recording in this session
     -> acquisition.Session
-    cell_id: varchar(36) # a string identifying the cell in which this intracellular recording is concerning
     ---
     -> CellType
     -> reference.ActionLocation

@@ -50,16 +50,16 @@ for fname in fnames:
     # ==================== session ====================
     # -- session_time
     session_info = dict(subject_info,
-                        experiment_description = nwb['general']['experiment_description'].value.decode('UTF-8'),
-                        institution = nwb['general']['institution'].value.decode('UTF-8'),
-                        related_publications = nwb['general']['related_publications'].value.decode('UTF-8'),
-                        session_id = nwb['general']['session_id'].value.decode('UTF-8'),
-                        surgery = nwb['general']['surgery'].value.decode('UTF-8'),
-                        lab = nwb['general']['lab'].value.decode('UTF-8'),
-                        notes = nwb['general']['notes'].value.decode('UTF-8'),
-                        identifier = nwb['identifier'].value.decode('UTF-8'),
-                        session_note = nwb['session_description'].value.decode('UTF-8'),
-                        session_time = utilities.parse_date(nwb['general']['session_id'].value.decode('UTF-8')))
+                        session_id=os.path.split(fname)[-1].replace('.nwb', ''),
+                        experiment_description=nwb['general']['experiment_description'].value.decode('UTF-8'),
+                        institution=nwb['general']['institution'].value.decode('UTF-8'),
+                        related_publications=nwb['general']['related_publications'].value.decode('UTF-8'),
+                        surgery=nwb['general']['surgery'].value.decode('UTF-8'),
+                        lab=nwb['general']['lab'].value.decode('UTF-8'),
+                        notes=nwb['general']['notes'].value.decode('UTF-8'),
+                        identifier=nwb['identifier'].value.decode('UTF-8'),
+                        session_note=nwb['session_description'].value.decode('UTF-8'),
+                        session_time=utilities.parse_date(nwb['general']['session_id'].value.decode('UTF-8')))
 
     experimenters = nwb['general']['experimenter'].value.decode('UTF-8')
     experiment_types = re.split('Experiment type: ', session_info['notes'])[-1]
@@ -74,7 +74,9 @@ for fname in fnames:
     reference.Experimenter.insert(zip(experimenters), skip_duplicates = True)
     acquisition.ExperimentType.insert(zip(experiment_types), skip_duplicates=True)
 
-    sess_key = {'subject_id': subject_info["subject_id"], 'session_time': session_info["session_time"]}
+    sess_key = {'subject_id': subject_info["subject_id"],
+                'session_time': session_info["session_time"],
+                'session_id': session_info['session_id']}
 
     with acquisition.Session.connection.transaction:
         if session_info not in acquisition.Session.proj():
@@ -113,7 +115,6 @@ for fname in fnames:
     unit = nwb['processing']['spike_times']['UnitTimes']['unit_list'].value[0].decode('UTF-8')
     unit_desc = nwb['processing']['spike_times']['UnitTimes'][unit]['unit_description'].value.decode('UTF-8')
     cell_key = dict({**sess_key, **action_location},
-                    cell_id = os.path.split(fname)[-1].replace('.nwb', ''),
                     cell_type = re.search('|'.join(intracellular.CellType.fetch('cell_type')), unit_desc, re.I).group(),
                     device_name = ie_info['device'])
 
@@ -158,21 +159,28 @@ for fname in fnames:
         skip_duplicates=True, allow_direct_insert=True)
     principal_whisker, principal_whisker_num = nwb['analysis']['principal_whisker'].value[0].decode('UTF-8'), '1'
     whisker_timeseries = nwb['processing']['whisker']['BehavioralTimeSeries']
-    for whisker_config, whisker_num in zip(nwb['general']['whisker_configuration'].value,
-                              set([re.search('\d', k).group() for k in whisker_timeseries])):
-        whisker_key = dict(sess_key, whisker_config=whisker_config.decode('UTF-8'))
+
+    whisker_configs = ([wk.decode('UTF-8') for wk in nwb["general"]["whisker_configuration"].value]
+                       if nwb["general"]["whisker_configuration"].value.shape
+                       else [wk for wk in nwb["general"]["whisker_configuration"].value.decode('UTF-8').split(',')])
+
+    print(f'Whiskers: {whisker_configs} - Principal: {principal_whisker}')
+    for whisker_config, whisker_num in zip(whisker_configs,
+                                           set([re.search('\d', k).group() for k in whisker_timeseries])):
+        whisker_key = dict(sess_key, whisker_config=whisker_config)
         principal_whisker_num = whisker_num if whisker_config == principal_whisker else principal_whisker_num
         if whisker_key not in behavior.Whisker.proj():
             behavior.Whisker.insert1(dict(
                 whisker_key,
+                principal_whisker=(whisker_config == principal_whisker),
                 distance_to_pole=whisker_timeseries['distance_to_pole_' + whisker_num]['data'].value.flatten(),
                 touch_offset=whisker_timeseries['touch_offset_' + whisker_num]['data'].value.flatten(),
                 touch_onset=whisker_timeseries['touch_onset_' + whisker_num]['data'].value.flatten(),
                 whisker_angle=whisker_timeseries['whisker_angle_' + whisker_num]['data'].value.flatten(),
                 whisker_curvature=whisker_timeseries['whisker_curvature_' + whisker_num]['data'].value.flatten(),
-                behavior_timestamps=whisker_timeseries['distance_to_pole_' + whisker_num]['timestamps'].value),
+                behavior_timestamps=whisker_timeseries['distance_to_pole_' + whisker_num]['timestamps'].value * 1e-3),  # convert msec->second
                 skip_duplicates=True, allow_direct_insert=True)
-            print(f'Ingest whisker data: {whisker_config.decode("UTF-8")}')
+            print(f'Ingest whisker data: {whisker_config} - Principal: {whisker_config == principal_whisker}')
 
     # ==================== Trials ====================
     trial_resp_options = [k.decode('UTF-8') for k in nwb['analysis']['trial_type_string'].value.flatten()][:-1]
@@ -227,6 +235,10 @@ for fname in fnames:
             acquisition.TrialSet.EventTime.insert((dict(trial_key, trial_event=k, event_time = v)
                                                    for k, v in events.items()),
                                                   ignore_extra_fields=True, allow_direct_insert=True)
+            stimulation.TrialPhotoStimInfo.insert1(dict(trial_key,
+                                                        photo_stim_mode='_'.join(
+                                                            trials['trial_type'][idx].split('_')[1:])),
+                                                   ignore_extra_fields=True, allow_direct_insert=True)
 
     # ==================== Photo stimulation ====================
     if 'optogenetics' in nwb['general']:

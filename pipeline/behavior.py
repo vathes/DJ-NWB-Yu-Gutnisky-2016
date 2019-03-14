@@ -22,6 +22,7 @@ class Whisker(dj.Imported):
     -> acquisition.Session
     -> reference.WhiskerConfig
     ---
+    principal_whisker=0: bool  # is this the principal whisker
     distance_to_pole=null: longblob  #
     touch_offset=null: longblob  #
     touch_onset=null: longblob  #
