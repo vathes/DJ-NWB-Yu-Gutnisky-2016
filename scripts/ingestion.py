@@ -111,23 +111,23 @@ for fname in fnames:
     reference.WholeCellDevice.insert1({'device_name': ie_info['device']}, skip_duplicates=True)
     # -- Cell - there should only be 1 unit for whole-cell recording
     unit = nwb['processing']['spike_times']['UnitTimes']['unit_list'].value[0].decode('UTF-8')
+    unit_desc = nwb['processing']['spike_times']['UnitTimes'][unit]['unit_description'].value.decode('UTF-8')
     cell_key = dict({**sess_key, **action_location},
                     cell_id = os.path.split(fname)[-1].replace('.nwb', ''),
-                    cell_type = nwb['processing']['spike_times']['UnitTimes'][unit]['unit_description'].value.decode('UTF-8'),
+                    cell_type = re.search('|'.join(intracellular.CellType.fetch('cell_type')), unit_desc, re.I).group(),
                     device_name = ie_info['device'])
+
+    # determine if it is 'membrane_potential' or 'juxta_potential'
+    for f in nwb['acquisition']['timeseries']:
+        if re.search('potential', f):
+            Vm_field = f
+            break
+    # shifting acquisition timestamps to 0 (if needed) - to synchronize with behavioral timestamps and trial times
+    acq_tstart = nwb['acquisition']['timeseries'][Vm_field]['timestamps'].value[0]
 
     with intracellular.Cell.connection.transaction:
         if cell_key not in intracellular.Cell.proj():
             intracellular.Cell.insert1(cell_key, ignore_extra_fields=True)
-
-            # determine if it is 'membrane_potential' or 'juxta_potential'
-            for f in nwb['acquisition']['timeseries']:
-                if re.search('potential', f):
-                    Vm_field = f
-                    break
-
-            # shifting acquisition timestamps to 0 (if needed) - to synchronize with behavioral timestamps and trial times
-            acq_tstart = nwb['acquisition']['timeseries'][Vm_field]['timestamps'].value[0]
 
             intracellular.MembranePotential.insert1(dict(
                 cell_key,
@@ -146,41 +146,66 @@ for fname in fnames:
                 unit_id=int(re.search('\d+', unit).group()),
                 spike_times=nwb['processing']['spike_times']['UnitTimes'][unit]['times'].value),
                 ignore_extra_fields = True, allow_direct_insert = True, skip_duplicates=True)
-
             print('Ingest intracellular data')
+        else:
+            print(f'Cell exists: {fname}')
+
+    # ==================== Behavior ====================
+    behavior.LickTrace.insert1(dict(
+        sess_key,
+        lick_trace=nwb['acquisition']['timeseries']['lick_trace']['data'].value,
+        lick_trace_timestamps=nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value - acq_tstart),
+        skip_duplicates=True, allow_direct_insert=True)
+    principal_whisker, principal_whisker_num = nwb['analysis']['principal_whisker'].value[0].decode('UTF-8'), '1'
+    whisker_timeseries = nwb['processing']['whisker']['BehavioralTimeSeries']
+    for whisker_config, whisker_num in zip(nwb['general']['whisker_configuration'].value,
+                              set([re.search('\d', k).group() for k in whisker_timeseries])):
+        whisker_key = dict(sess_key, whisker_config=whisker_config.decode('UTF-8'))
+        principal_whisker_num = whisker_num if whisker_config == principal_whisker else principal_whisker_num
+        if whisker_key not in behavior.Whisker.proj():
+            behavior.Whisker.insert1(dict(
+                whisker_key,
+                distance_to_pole=whisker_timeseries['distance_to_pole_' + whisker_num]['data'].value.flatten(),
+                touch_offset=whisker_timeseries['touch_offset_' + whisker_num]['data'].value.flatten(),
+                touch_onset=whisker_timeseries['touch_onset_' + whisker_num]['data'].value.flatten(),
+                whisker_angle=whisker_timeseries['whisker_angle_' + whisker_num]['data'].value.flatten(),
+                whisker_curvature=whisker_timeseries['whisker_curvature_' + whisker_num]['data'].value.flatten(),
+                behavior_timestamps=whisker_timeseries['distance_to_pole_' + whisker_num]['timestamps'].value),
+                skip_duplicates=True, allow_direct_insert=True)
+            print(f'Ingest whisker data: {whisker_config.decode("UTF-8")}')
 
     # ==================== Trials ====================
     trial_resp_options = [k.decode('UTF-8') for k in nwb['analysis']['trial_type_string'].value.flatten()][:-1]
     # -- read trial-related info -- nwb['epochs'], nwb['analysis'], nwb['stimulus']['presentation'])
     trials = dict(trial_names=[tr for tr in nwb['epochs']],
-                         trial_type=[v['description'].value.decode('UTF-8') for v in nwb['epochs'].values()],
-                         start_times=[v['start_time'].value for v in nwb['epochs'].values()],
-                         stop_times=[v['stop_time'].value for v in nwb['epochs'].values()],
-                         good_trials=nwb['analysis']['good_trials'].value,
-                         trial_response=nwb['analysis']['trial_type_mat'].value,
-                         pole_pos_time=nwb['stimulus']['presentation']['pole_pos']['timestamps'].value,
-                         pole_pos=nwb['stimulus']['presentation']['pole_pos']['data'].value,
-                         pole_in_times=nwb['stimulus']['presentation']['pole_in']['timestamps'].value,
-                         pole_out_times=nwb['stimulus']['presentation']['pole_out']['timestamps'].value)
+                  trial_type=[v['description'].value.decode('UTF-8') for v in nwb['epochs'].values()],
+                  start_times=[v['start_time'].value for v in nwb['epochs'].values()],
+                  stop_times=[v['stop_time'].value for v in nwb['epochs'].values()],
+                  good_trials=nwb['analysis']['good_trials'].value,
+                  trial_response=nwb['analysis']['trial_type_mat'].value,
+                  pole_pos_time=nwb['stimulus']['presentation']['pole_pos']['timestamps'].value,
+                  pole_pos=nwb['stimulus']['presentation']['pole_pos']['data'].value,
+                  pole_in_times=nwb['stimulus']['presentation']['pole_in']['timestamps'].value,
+                  pole_out_times=nwb['stimulus']['presentation']['pole_out']['timestamps'].value)
 
     lick_times = (nwb['acquisition']['timeseries']['lick_trace']['data'].value *
                   (nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value - acq_tstart))
     lick_times = lick_times[lick_times != 0]
-    touch_times = (nwb['processing']['whisker']['BehavioralTimeSeries']['touch_onset_1']['data'].value.flatten() *
-                   nwb['processing']['whisker']['BehavioralTimeSeries']['touch_onset_1']['timestamps'].value.flatten())
+    touch_times = (nwb['processing']['whisker']['BehavioralTimeSeries']['touch_onset_' + principal_whisker_num]['data'].value.flatten() *
+                   nwb['processing']['whisker']['BehavioralTimeSeries']['touch_onset_' + principal_whisker_num]['timestamps'].value.flatten())
     touch_times = touch_times[touch_times != 0] * 1e-3  # convert ms -> s (behav data timestamps are in millisecond)
 
     # form new key-values pair and insert key
     trial_set = dict(sess_key, trial_counts=len(trials['trial_names']))
     if trial_set not in acquisition.TrialSet.proj():
-        print(f'Ingest trial information')
+        print(f'Ingest trial information\n')
         acquisition.TrialSet.insert1(trial_set, allow_direct_insert=True)
         for idx, trial_id in tqdm(enumerate(trials['trial_names'])):
             trial_key = dict(trial_set, trial_id=int(re.search('\d+', trial_id).group()))
             trial_detail = dict(start_time=trials['start_times'][idx],
                                 stop_time=trials['stop_times'][idx],
                                 trial_is_good=True if trials['good_trials'].flatten()[idx] == 1 else False,
-                                trial_type=trials['trial_type'][idx],
+                                trial_type=re.match('Go|Nogo', trials['trial_type'][idx]).group(),
                                 trial_stim_present=True if trials['trial_response'][idx, -1] == 1 else False,
                                 trial_response=trial_resp_options[np.where(trials['trial_response'][idx, :-1])[0][0]],
                                 pole_position=trials['pole_pos'][idx])
@@ -203,82 +228,61 @@ for fname in fnames:
                                                    for k, v in events.items()),
                                                   ignore_extra_fields=True, allow_direct_insert=True)
 
-    # ==================== Behavior ====================
-    behavior.LickTrace.insert1(dict(
-        sess_key,
-        lick_trace=nwb['acquisition']['timeseries']['lick_trace']['data'].value,
-        lick_trace_timestamps=nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value - acq_tstart),
-        skip_duplicates=True, allow_direct_insert=True)
-
-    whisker_timeseries = nwb['processing']['whisker']['BehavioralTimeSeries']
-    for whisker_config, whisker_num in zip(nwb['general']['whisker_configuration'].value,
-                              set([re.search('\d', k).group() for k in whisker_timeseries])):
-        behavior.Whisker.insert1(dict(
-            sess_key,
-            whisker_config=whisker_config.decode('UTF-8'),
-            distance_to_pole=whisker_timeseries['distance_to_pole_' + whisker_num]['data'].value.flatten(),
-            touch_offset=whisker_timeseries['touch_offset_' + whisker_num]['data'].value.flatten(),
-            touch_onset=whisker_timeseries['touch_onset_' + whisker_num]['data'].value.flatten(),
-            whisker_angle=whisker_timeseries['whisker_angle_' + whisker_num]['data'].value.flatten(),
-            whisker_curvature=whisker_timeseries['whisker_curvature_' + whisker_num]['data'].value.flatten(),
-            behavior_timestamps=whisker_timeseries['distance_to_pole_' + whisker_num]['timestamps'].value),
-            skip_duplicates=True, allow_direct_insert=True)
-        print(f'Ingest whisker data: {whisker_config.decode("UTF-8")}')
-
     # ==================== Photo stimulation ====================
-    for site in nwb['general']['optogenetics']:
-        opto_descs = nwb['general']['optogenetics'][site]['description'].value.decode('UTF-8')
-        opto_excitation_lambda = (re.search("\d+",
-                                            nwb['general']['optogenetics'][site]['excitation_lambda']
-                                            .value.decode('UTF-8')).group())
-        splittedstr = re.split(',\s?coordinates:\s?',
-                               nwb['general']['optogenetics'][site]['location'].value.decode('UTF-8'))
-        brain_region = splittedstr[0]
-        coord_ap_ml_dv = re.findall('\d+\.\d+', splittedstr[-1])
+    if 'optogenetics' in nwb['general']:
+        for site in nwb['general']['optogenetics']:
+            opto_descs = nwb['general']['optogenetics'][site]['description'].value.decode('UTF-8')
+            opto_excitation_lambda = (re.search("\d+",
+                                                nwb['general']['optogenetics'][site]['excitation_lambda']
+                                                .value.decode('UTF-8')).group())
+            splittedstr = re.split(',\s?coordinates:\s?',
+                                   nwb['general']['optogenetics'][site]['location'].value.decode('UTF-8'))
+            brain_region = splittedstr[0]
+            coord_ap_ml_dv = re.findall('\d+\.\d+', splittedstr[-1])
 
-        # -- BrainLocation
-        brain_location = {'brain_region': brain_region,
-                          'brain_subregion': 'N/A',
-                          'cortical_layer': 'N/A',
-                          'hemisphere': hemisphere}
-        reference.BrainLocation.insert1(brain_location, skip_duplicates=True)
-        # -- ActionLocation
-        action_location = dict(brain_location,
-                               coordinate_ref = 'bregma',
-                               coordinate_ap = round(Decimal(coord_ap_ml_dv[0]), 2),
-                               coordinate_ml = round(Decimal(coord_ap_ml_dv[1]), 2),
-                               coordinate_dv = round(Decimal(coord_ap_ml_dv[2]), 2))
-        reference.ActionLocation.insert1(action_location, skip_duplicates=True)
+            # -- BrainLocation
+            brain_location = {'brain_region': brain_region,
+                              'brain_subregion': 'N/A',
+                              'cortical_layer': 'N/A',
+                              'hemisphere': hemisphere}
+            reference.BrainLocation.insert1(brain_location, skip_duplicates=True)
+            # -- ActionLocation
+            action_location = dict(brain_location,
+                                   coordinate_ref = 'bregma',
+                                   coordinate_ap = round(Decimal(coord_ap_ml_dv[0]), 2),
+                                   coordinate_ml = round(Decimal(coord_ap_ml_dv[1]), 2),
+                                   coordinate_dv = round(Decimal(coord_ap_ml_dv[2]), 2))
+            reference.ActionLocation.insert1(action_location, skip_duplicates=True)
 
-        # -- Device
-        stim_device = nwb['general']['optogenetics'][site]['device'].value.decode('UTF-8')
-        stimulation.PhotoStimDevice.insert1({'device_name': stim_device}, skip_duplicates=True)
+            # -- Device
+            stim_device = nwb['general']['optogenetics'][site]['device'].value.decode('UTF-8')
+            stimulation.PhotoStimDevice.insert1({'device_name': stim_device}, skip_duplicates=True)
 
-        # -- PhotoStimulationProtocol
-        photim_stim_protocol = dict(protocol=re.search('\d+', site).group(),
-                                device_name=stim_device,
-                                photo_stim_method='laser',
-                                photo_stim_excitation_lambda=float(opto_excitation_lambda),
-                                photo_stim_notes=(f'{site} - {opto_descs}'))
-        stimulation.PhotoStimulationProtocol.insert1(photim_stim_protocol, skip_duplicates=True)
+            # -- PhotoStimulationProtocol
+            photim_stim_protocol = dict(protocol=re.search('\d+', site).group(),
+                                    device_name=stim_device,
+                                    photo_stim_method='laser',
+                                    photo_stim_excitation_lambda=float(opto_excitation_lambda),
+                                    photo_stim_notes=(f'{site} - {opto_descs}'))
+            stimulation.PhotoStimulationProtocol.insert1(photim_stim_protocol, skip_duplicates=True)
 
-        # -- PhotoStimulation
-        stim_presentation = None
-        for f in nwb['stimulus']['presentation']:
-            if ('site' in nwb['stimulus']['presentation'][f]
-                    and nwb['stimulus']['presentation'][f]['site'].value.decode('UTF-8') == site):
-                stim_presentation = nwb['stimulus']['presentation'][f]
-                break
+            # -- PhotoStimulation
+            stim_presentation = None
+            for f in nwb['stimulus']['presentation']:
+                if ('site' in nwb['stimulus']['presentation'][f]
+                        and nwb['stimulus']['presentation'][f]['site'].value.decode('UTF-8') == site):
+                    stim_presentation = nwb['stimulus']['presentation'][f]
+                    break
 
-        if stim_presentation and dict({**subject_info, **session_info}, photostim_id=site) not in stimulation.PhotoStimulation.proj():
-            photostim_data = stim_presentation['data'].value
-            photostim_timestamps = stim_presentation['timestamps'].value
-            stimulation.PhotoStimulation.insert1(dict({**session_info, **photim_stim_protocol, **action_location},
-                                                      photostim_id=site,
-                                                      photostim_timeseries=photostim_data,
-                                                      photostim_timestamps=photostim_timestamps),
-                                                 ignore_extra_fields = True)
-            print(f'Ingest photostim: {site}')
+            if stim_presentation and dict({**subject_info, **session_info}, photostim_id=site) not in stimulation.PhotoStimulation.proj():
+                photostim_data = stim_presentation['data'].value
+                photostim_timestamps = stim_presentation['timestamps'].value
+                stimulation.PhotoStimulation.insert1(dict({**session_info, **photim_stim_protocol, **action_location},
+                                                          photostim_id=site,
+                                                          photostim_timeseries=photostim_data,
+                                                          photostim_timestamps=photostim_timestamps),
+                                                     ignore_extra_fields = True)
+                print(f'Ingest photostim: {site}')
 
     # ==================== Virus ====================
     virus_desc_pattern = re.compile(r'virusSource: (?P<virus_source>.*); virusID: (?P<virus_id>.*); virusLotNumber: (?P<virus_lot_num>.*); inflectionCoordinates: (?P<injection_coord>.*); infectionLocation: (?P<injection_loc>.*); virusTiter: (?P<virus_titer>.*); injectionVolume: (?P<injection_volume>.*); injectionDate: (?P<injection_date>.*);(.+)')

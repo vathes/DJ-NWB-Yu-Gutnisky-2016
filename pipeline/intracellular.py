@@ -17,12 +17,20 @@ schema = dj.schema(dj.config['custom']['database.prefix'] + 'intracellular')
 
 
 @schema
+class CellType(dj.Lookup):
+    definition = """
+    cell_type: varchar(12)
+    """
+    contents = zip(['excitatory', 'inhibitory', 'FSIN', 'fast-spiking', 'N/A'])
+
+
+@schema
 class Cell(dj.Manual):
     definition = """ # A cell undergone intracellular recording in this session
     -> acquisition.Session
     cell_id: varchar(36) # a string identifying the cell in which this intracellular recording is concerning
     ---
-    cell_type: enum('excitatory','inhibitory','N/A')
+    -> CellType
     -> reference.ActionLocation
     -> reference.WholeCellDevice
     """

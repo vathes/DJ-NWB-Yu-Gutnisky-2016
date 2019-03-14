@@ -133,7 +133,7 @@ class WhiskerConfig(dj.Lookup):
     definition = """
     whisker_config: varchar(32)
     """
-    contents = zip(['full', 'C1', 'C2'])
+    contents = zip(['full', 'C1', 'C2', 'C3', 'D1', 'D2', 'D3'])
        
     
 @schema
@@ -158,7 +158,10 @@ class TrialType(dj.Lookup):
     contents = zip(['Go', 'Nogo',
                     'GoStim_5ms_pulse', 'NogoStim_5ms_pulse',
                     'GoStim_constant', 'NogoStim_constant',
+                    'GoStim_constant_shift', 'NogoStim_constant_shift',
                     'GoStim_shift', 'NogoStim_shift',
+                    'GoStim_shiftgrid', 'NogoStim_shiftgrid',
+                    'GoStim_5ms_grid', 'NogoStim_5ms_grid',
                     'N/A'])
     
     

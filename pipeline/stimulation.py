@@ -56,7 +56,7 @@ class TrialPhotoStimInfo(dj.Imported):
     definition = """ # information related to the stimulation settings for this trial
     -> acquisition.TrialSet.Trial
     ---
-    photo_stim_period: enum('sample','early delay', 'late delay','response','N/A')
+    photo_stim_mode: enum('constant','pulse')
     photo_stim_power=null: float  # (mW) stimulation power 
     """
 

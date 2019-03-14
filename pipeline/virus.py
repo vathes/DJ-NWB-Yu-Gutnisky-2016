@@ -41,7 +41,6 @@ class VirusInjection(dj.Manual):
     -> reference.BrainLocation
     -> reference.CoordinateReference
     injection_date: date   
-    injection_depth: decimal(6,2)  # (um)
     ---
     -> Virus
     injection_volume: float # in nL
