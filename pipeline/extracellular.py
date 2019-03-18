@@ -21,8 +21,14 @@ class ProbeInsertion(dj.Manual):
     definition = """ # Description of probe insertion details during extracellular recording
     -> acquisition.Session
     -> reference.Probe
-    -> reference.BrainLocation
     """
+
+    class InsertLocation(dj.Part):
+        definition = """
+        -> master
+        -> reference.Probe.Shank
+        -> reference.ActionLocation
+        """
 
 
 @schema
@@ -41,21 +47,28 @@ class Voltage(dj.Imported):
 
 
 @schema
-class UnitSpikeTimes(dj.Imported):
+class UnitSpikeTimes(dj.Manual):
     definition = """ 
     -> ProbeInsertion
     unit_id : smallint
     ---
-    -> reference.Probe.Channel
     spike_times: longblob  # (s) time of each spike, with respect to the start of session 
-    unit_cell_type='N/A': varchar(32)  # e.g. cell-type of this unit (e.g. wide width, narrow width spiking)
-    unit_spike_width: float  # (ms) spike width of this unit, from bottom peak to next positive peak or time point spike terminates
-    unit_depth: float  # (mm)
-    spike_waveform: longblob  # waveform(s) of each spike at each spike time (spike_time x waveform_timestamps)
+    cell_desc='N/A': varchar(32)  # e.g. description of this unit (e.g. cell type)  
     """
 
-    def make(self, key):
-        return NotImplementedError
+    class UnitChannel(dj.Part):
+        definition = """
+        -> master
+        -> reference.Probe.Channel
+        """
+
+    class SpikeWaveform(dj.Part):
+        definition = """
+        -> master
+        -> UnitSpikeTimes.UnitChannel
+        ---
+        spike_waveform: longblob  # waveform(s) of each spike at each spike time (waveform_timestamps x spike_times)
+        """
 
 
 @schema

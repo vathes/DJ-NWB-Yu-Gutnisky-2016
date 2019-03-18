@@ -8,21 +8,19 @@ from tqdm import tqdm
 import glob
 
 import datajoint as dj
-from pipeline import (reference, subject, acquisition, intracellular, behavior, stimulation, virus, utilities)
-
-# path = os.path.join('.', 'data', 'data', 'VPM_silicon_probe')
-# fname = 'ANM186997_20130321.nwb'
-# nwb = h5.File(os.path.join(path, fname), 'r')
+from pipeline import (reference, subject, acquisition, extracellular, behavior, stimulation, virus, utilities)
 
 path = os.path.join('.', 'data', 'data')
 fnames = np.hstack(glob.glob(os.path.join(dir_files[0], '*.nwb'))
-                   for dir_files in os.walk(path) if len(dir_files[1]) == 0)
+                   if len(dir_files[1]) == 0 and dir_files[0].find('VPM_silicon_probe') != -1 else []
+                   for dir_files in os.walk(path))
+
 for fname in fnames:
     nwb = h5.File(fname, 'r')
     subject_info = {c: nwb['general']['subject'][c].value.decode('UTF-8')
-                    for c in ('subject_id', 'description', 'sex', 'species', 'weight', 'age', 'genotype')}
+                    for c in ('description', 'sex', 'species', 'weight', 'age', 'genotype')}
     # force subject_id to be lower-case for consistency
-    subject_info['subject_id'] = subject_info['subject_id'].lower()
+    subject_info['subject_id'] = os.path.split(fname)[-1].split('_')[0].lower()
 
     # dob and sex
     subject_info['sex'] = subject_info['sex'][0].upper()
@@ -49,9 +47,9 @@ for fname in fnames:
 
     # ==================== session ====================
     # -- session_time
+    sess_time = re.search('(?<=_)(\d{8})(?=\.nwb)', nwb['general']['session_id'].value.decode('UTF-8')).group()
     session_info = dict(subject_info,
                         session_id=os.path.split(fname)[-1].replace('.nwb', ''),
-                        experiment_description=nwb['general']['experiment_description'].value.decode('UTF-8'),
                         institution=nwb['general']['institution'].value.decode('UTF-8'),
                         related_publications=nwb['general']['related_publications'].value.decode('UTF-8'),
                         surgery=nwb['general']['surgery'].value.decode('UTF-8'),
@@ -59,13 +57,11 @@ for fname in fnames:
                         notes=nwb['general']['notes'].value.decode('UTF-8'),
                         identifier=nwb['identifier'].value.decode('UTF-8'),
                         session_note=nwb['session_description'].value.decode('UTF-8'),
-                        session_time=utilities.parse_date(nwb['general']['session_id'].value.decode('UTF-8')))
+                        session_time=utilities.parse_date(sess_time))
 
     experimenters = nwb['general']['experimenter'].value.decode('UTF-8')
     experiment_types = re.split('Experiment type: ', session_info['notes'])[-1]
     experiment_types = re.split(',\s?', experiment_types)
-
-    session_info['session_note'] = session_info.pop('session_note') + '; ' + session_info.pop('experiment_description')
 
     # experimenter and experiment type (possible multiple experimenters or types)
     experimenters = [experimenters] if np.array(
@@ -87,82 +83,99 @@ for fname in fnames:
                                                        for k in experiment_types), ignore_extra_fields=True)
         print(f'\nCreating Session - Subject: {subject_info["subject_id"]} - Date: {session_info["session_time"]}')
 
-    # ==================== Intracellular ====================
-    # -- read data - intracellular_ephys
-    ephys_name = list(nwb['general']['intracellular_ephys'])[0]
-    ie_info = {c: nwb['general']['intracellular_ephys'][ephys_name][c].value.decode('UTF-8')
-               for c in nwb['general']['intracellular_ephys'][ephys_name]}
+    # ==================== Extracellular ====================
+    # # Probe
+    # probe_re_pattern = re.compile(r'(.*)probeSource: (?P<probe_source>.*)probeType: (?P<probe>.*)')
+    # match = probe_re_pattern.match(nwb['general']['extracellular_ephys']['shank0']['description'].value.decode('UTF-8'))
 
-    coord_ap_ml_dv = re.findall('\d+.\d+', ie_info['location'])
+    ec_probe = {'probe_name': '4x8_Neuronexus_Z50um_X200um',  #  hardcoded
+                'channel_counts': len(nwb['general']['extracellular_ephys']['electrode_map']),
+                'probe_source': 'NeuroNexus',
+                'probe_desc': nwb['general']['devices']['ephys-acquisition'].value.decode('UTF-8')}
+    with reference.Probe.connection.transaction:
+        if ec_probe not in reference.Probe.proj():
+            reference.Probe.insert1(ec_probe)
+            reference.Probe.Shank.insert((
+                dict(ec_probe, shank_id=int(re.search('\d+', shank.decode('UTF-8')).group()))
+                for shank in set(nwb['general']['extracellular_ephys']['electrode_group'].value)),
+            ignore_extra_fields=True)
+            reference.Probe.Channel.insert((
+                dict(ec_probe,
+                     channel_id=chn_id + 1,  # channel starts from 1
+                     shank_id=int(re.search('\d+', chn_shank.decode('UTF-8')).group()),
+                     channel_x_pos=chn_loc[0],
+                     channel_y_pos=chn_loc[1],
+                     channel_z_pos=chn_loc[2])
+                for chn_id, (chn_loc, chn_shank) in enumerate(
+                zip(nwb['general']['extracellular_ephys']['electrode_map'],
+                    nwb['general']['extracellular_ephys']['electrode_group']))),
+                ignore_extra_fields=True)
 
-    hemisphere = 'left'  # hardcoded here
-    brain_location = {'brain_region': 'barrel cortex',  #  hardcoded here
-                      'brain_subregion': 'N/A',
-                      'cortical_layer': re.search('(?<=L)(\d)', session_info['session_note']).group(),
-                      'hemisphere': hemisphere}
-    reference.BrainLocation.insert1(brain_location, skip_duplicates = True)
-    # -- ActionLocation
-    action_location = dict(brain_location,
-                           coordinate_ref='bregma',  # hardcoded here
-                           coordinate_ap=round(Decimal(coord_ap_ml_dv[0]), 2),
-                           coordinate_ml=round(Decimal(coord_ap_ml_dv[1]), 2),
-                           coordinate_dv=round(Decimal(coord_ap_ml_dv[2]) * Decimal('1e-3'), 2))
-    reference.ActionLocation.insert1(action_location, skip_duplicates = True)
+    # Probe-insertion
+    # For this study all extracellular probe recordings are at the VPM of the thalamus
+    brain_location = {'brain_region': 'thalamus',
+                      'brain_subregion': 'VPM',
+                      'cortical_layer': 'N/A',
+                      'hemisphere': 'left'}
+    reference.BrainLocation.insert1(brain_location, skip_duplicates=True)
 
-    # -- Whole Cell Device
-    reference.WholeCellDevice.insert1({'device_name': ie_info['device']}, skip_duplicates=True)
-    # -- Cell - there should only be 1 unit for whole-cell recording
-    unit = nwb['processing']['spike_times']['UnitTimes']['unit_list'].value[0].decode('UTF-8')
-    unit_desc = nwb['processing']['spike_times']['UnitTimes'][unit]['unit_description'].value.decode('UTF-8')
-    cell_key = dict({**sess_key, **action_location},
-                    cell_type = re.search('|'.join(intracellular.CellType.fetch('cell_type')), unit_desc, re.I).group(),
-                    device_name = ie_info['device'])
+    with extracellular.ProbeInsertion.connection.transaction:
+        if {**ec_probe, **sess_key} not in extracellular.ProbeInsertion.proj():
+            extracellular.ProbeInsertion.insert1({**ec_probe, **sess_key}, ignore_extra_fields=True)
+            for shank_id in set(nwb['general']['extracellular_ephys']['electrode_group'].value):
+                shank = nwb['general']['extracellular_ephys'][shank_id.decode('UTF-8')]
+                shank_loc = re.findall('\d+\.\d+', shank['location'].value.decode('UTF-8'))
+                action_location = dict(brain_location,
+                                       coordinate_ref = 'bregma',
+                                       coordinate_ap = round(Decimal(shank_loc[0]), 2),
+                                       coordinate_ml = round(Decimal(shank_loc[1]), 2),
+                                       coordinate_dv = Decimal('2.5'))  #  depth info from the paper
+                reference.ActionLocation.insert1(action_location, skip_duplicates = True)
+                extracellular.ProbeInsertion.InsertLocation.insert1(
+                    dict({**ec_probe, **sess_key, **action_location},
+                         shank_id=int(re.search('\d+', shank_id.decode('UTF-8')).group())),
+                    ignore_extra_fields=True)
 
-    # determine if it is 'membrane_potential' or 'juxta_potential'
-    for f in nwb['acquisition']['timeseries']:
-        if re.search('potential', f):
-            Vm_field = f
-            break
-    # shifting acquisition timestamps to 0 (if needed) - to synchronize with behavioral timestamps and trial times
-    acq_tstart = nwb['acquisition']['timeseries'][Vm_field]['timestamps'].value[0]
-
-    with intracellular.Cell.connection.transaction:
-        if cell_key not in intracellular.Cell.proj():
-            intracellular.Cell.insert1(cell_key, ignore_extra_fields=True)
-
-            intracellular.MembranePotential.insert1(dict(
-                cell_key,
-                membrane_potential=nwb['acquisition']['timeseries'][Vm_field]['data'].value,
-                membrane_potential_timestamps=nwb['acquisition']['timeseries'][Vm_field]['timestamps'].value - acq_tstart),
-                ignore_extra_fields=True, allow_direct_insert=True, skip_duplicates=True)
-
-            intracellular.CurrentInjection.insert1(dict(
-                cell_key,
-                current_injection=nwb['acquisition']['timeseries']['current']['data'].value,
-                current_injection_timestamps=nwb['acquisition']['timeseries']['current']['timestamps'].value - acq_tstart),
-                ignore_extra_fields = True, allow_direct_insert = True, skip_duplicates=True)
-
-            intracellular.UnitSpikeTimes.insert1(dict(
-                cell_key,
-                unit_id=int(re.search('\d+', unit).group()),
-                spike_times=nwb['processing']['spike_times']['UnitTimes'][unit]['times'].value),
-                ignore_extra_fields = True, allow_direct_insert = True, skip_duplicates=True)
-            print('Ingest intracellular data')
-        else:
-            print(f'Cell exists: {fname}')
+    # Unit spikes
+    extracellular_units = nwb['processing']['extracellular_units']
+    for u in extracellular_units['UnitTimes']['unit_list'].value:
+        unit = u.decode('UTF-8')
+        unit_id = int(re.search('\d+', unit).group())
+        with extracellular.UnitSpikeTimes.connection.transaction:
+            extracellular.UnitSpikeTimes.insert1(
+                dict({**ec_probe, **sess_key},
+                     unit_id=unit_id,
+                     cell_desc=''.join([v.decode('UTF-8').replace(unit + ' - ', '')
+                                        for v in extracellular_units['UnitTimes']['cell_types'].value
+                                        if v.decode('UTF-8').find(unit) != -1]),
+                     spike_times=extracellular_units['UnitTimes'][unit]['times'].value),
+                ignore_extra_fields=True)
+            extracellular.UnitSpikeTimes.UnitChannel.insert(
+                (dict({**ec_probe, **sess_key}, unit_id=unit_id, channel_id=chn)
+                 for chn in extracellular_units['EventWaveform'][unit]['electrode_idx'].value),
+                ignore_extra_fields=True)
+            extracellular.UnitSpikeTimes.SpikeWaveform.insert(
+                (dict({**ec_probe, **sess_key}, unit_id = unit_id, channel_id = chn,
+                      spike_waveform=waveform)
+                 for chn, waveform in zip(extracellular_units['EventWaveform'][unit]['electrode_idx'].value,
+                                          extracellular_units['EventWaveform'][unit]['data'].value.transpose((2,0,1)))),
+                ignore_extra_fields=True)
 
     # ==================== Behavior ====================
+    acq_tstart = nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value[0]
+
     behavior.LickTrace.insert1(dict(
         sess_key,
         lick_trace=nwb['acquisition']['timeseries']['lick_trace']['data'].value,
         lick_trace_timestamps=nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value - acq_tstart),
         skip_duplicates=True, allow_direct_insert=True)
-    principal_whisker, principal_whisker_num = nwb['analysis']['principal_whisker'].value[0].decode('UTF-8'), '1'
+
     whisker_timeseries = nwb['processing']['whisker']['BehavioralTimeSeries']
 
     whisker_configs = ([wk.decode('UTF-8') for wk in nwb["general"]["whisker_configuration"].value]
                        if nwb["general"]["whisker_configuration"].value.shape
                        else [wk for wk in nwb["general"]["whisker_configuration"].value.decode('UTF-8').split(',')])
+    principal_whisker, principal_whisker_num = whisker_configs[int(nwb['analysis']['principal_whisker'].value[0])-1], '1'
 
     print(f'Whiskers: {whisker_configs} - Principal: {principal_whisker}')
     for whisker_config, whisker_num in zip(whisker_configs,
@@ -173,26 +186,26 @@ for fname in fnames:
             behavior.Whisker.insert1(dict(
                 whisker_key,
                 principal_whisker=(whisker_config == principal_whisker),
-                distance_to_pole=whisker_timeseries['distance_to_pole_' + whisker_num]['data'].value.flatten(),
+                block_mask=whisker_timeseries['block_mask_' + whisker_num]['data'].value.flatten(),
                 touch_offset=whisker_timeseries['touch_offset_' + whisker_num]['data'].value.flatten(),
                 touch_onset=whisker_timeseries['touch_onset_' + whisker_num]['data'].value.flatten(),
                 whisker_angle=whisker_timeseries['whisker_angle_' + whisker_num]['data'].value.flatten(),
                 whisker_curvature=whisker_timeseries['whisker_curvature_' + whisker_num]['data'].value.flatten(),
-                behavior_timestamps=whisker_timeseries['distance_to_pole_' + whisker_num]['timestamps'].value * 1e-3),  # convert msec->second
+                behavior_timestamps=whisker_timeseries['touch_onset_' + whisker_num]['timestamps'].value * 1e-3),  # convert msec->second
                 skip_duplicates=True, allow_direct_insert=True)
             print(f'Ingest whisker data: {whisker_config} - Principal: {whisker_config == principal_whisker}')
 
     # ==================== Trials ====================
-    trial_resp_options = [k.decode('UTF-8') for k in nwb['analysis']['trial_type_string'].value.flatten()][:-1]
+    trial_resp_options = [k.decode('UTF-8') for k in nwb['analysis']['trial_type_string'].value.flatten()]
     # -- read trial-related info -- nwb['epochs'], nwb['analysis'], nwb['stimulus']['presentation'])
     trials = dict(trial_names=[tr for tr in nwb['epochs']],
-                  trial_type=[v['description'].value.decode('UTF-8') for v in nwb['epochs'].values()],
+                  trial_type=[nwb['epochs'][v]['tags'].value[0].decode('UTF-8') for v in nwb['epochs']],
                   start_times=[v['start_time'].value for v in nwb['epochs'].values()],
                   stop_times=[v['stop_time'].value for v in nwb['epochs'].values()],
-                  good_trials=nwb['analysis']['good_trials'].value,
-                  trial_response=nwb['analysis']['trial_type_mat'].value,
-                  pole_pos_time=nwb['stimulus']['presentation']['pole_pos']['timestamps'].value,
-                  pole_pos=nwb['stimulus']['presentation']['pole_pos']['data'].value,
+                  good_trials=[k.any() for k in nwb['analysis']['good_trials_units'].value],
+                  trial_response=nwb['analysis']['trial_type_mat'].value.T,
+                  pole_pos_time=nwb['stimulus']['presentation']['pole_position']['timestamps'].value,
+                  pole_pos=nwb['stimulus']['presentation']['pole_position']['data'].value,
                   pole_in_times=nwb['stimulus']['presentation']['pole_in']['timestamps'].value,
                   pole_out_times=nwb['stimulus']['presentation']['pole_out']['timestamps'].value)
 
@@ -212,10 +225,10 @@ for fname in fnames:
             trial_key = dict(trial_set, trial_id=int(re.search('\d+', trial_id).group()))
             trial_detail = dict(start_time=trials['start_times'][idx],
                                 stop_time=trials['stop_times'][idx],
-                                trial_is_good=True if trials['good_trials'].flatten()[idx] == 1 else False,
+                                trial_is_good=trials['good_trials'][idx],
                                 trial_type=re.match('Go|Nogo', trials['trial_type'][idx]).group(),
                                 trial_stim_present=True if trials['trial_response'][idx, -1] == 1 else False,
-                                trial_response=trial_resp_options[np.where(trials['trial_response'][idx, :-1])[0][0]],
+                                trial_response=trial_resp_options[np.where(trials['trial_response'][idx, :])[0][0]],
                                 pole_position=trials['pole_pos'][idx])
             # insert
             acquisition.TrialSet.Trial.insert1({**trial_key, **trial_detail}, ignore_extra_fields=True, skip_duplicates=True, allow_direct_insert=True)
@@ -300,7 +313,6 @@ for fname in fnames:
     virus_desc_pattern = re.compile(r'virusSource: (?P<virus_source>.*); virusID: (?P<virus_id>.*); virusLotNumber: (?P<virus_lot_num>.*); inflectionCoordinates: (?P<injection_coord>.*); infectionLocation: (?P<injection_loc>.*); virusTiter: (?P<virus_titer>.*); injectionVolume: (?P<injection_volume>.*); injectionDate: (?P<injection_date>.*);(.+)')
     match = virus_desc_pattern.match(nwb['general']['virus'].value.decode('UTF-8'))
 
-    # ==================== Virus ====================
     if match and match['virus_id']:
         virus_info = dict(
             virus_source=match['virus_source'],

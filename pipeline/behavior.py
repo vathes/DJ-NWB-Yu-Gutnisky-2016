@@ -24,6 +24,7 @@ class Whisker(dj.Imported):
     ---
     principal_whisker=0: bool  # is this the principal whisker
     distance_to_pole=null: longblob  #
+    block_mask=null: longblob  #
     touch_offset=null: longblob  #
     touch_onset=null: longblob  #
     whisker_angle=null: longblob  #

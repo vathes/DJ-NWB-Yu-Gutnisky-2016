@@ -13,7 +13,7 @@ time_unit_conversion_factor = {'millisecond': 1e-3,
                                'hour': 3600,
                                'day': 86400}
 
-datetime_formats = ['%Y-%m-%d']
+datetime_formats = ['%Y-%m-%d', '%Y%m%d']
 
 
 def parse_date(text):
@@ -23,7 +23,7 @@ def parse_date(text):
             return datetime.strptime(text[:cover], fmt)
         except ValueError:
             pass
-    raise ValueError('no valid date format found')
+    return None
 
 
 def find_session_matched_matfile(sess_data_dir, sess_key):

@@ -93,8 +93,12 @@ cell_key = dict({**subject_info, **session_info, **action_location},
 for idx, fname in enumerate(fnames):
     print(idx)
     nwb = h5.File(fname, 'r')
-    trial_type=[v['description'].value.decode('UTF-8') for v in nwb['epochs'].values()]
-    print(set(trial_type))
+    # trial_type=[v['description'].value.decode('UTF-8') for v in nwb['epochs'].values()]
+    # print(set(trial_type))
+    whisker_configs = ([wk.decode('UTF-8') for wk in nwb["general"]["whisker_configuration"].value]
+                       if nwb["general"]["whisker_configuration"].value.shape
+                       else [wk for wk in nwb["general"]["whisker_configuration"].value.decode('UTF-8').split(',')])
+    print(whisker_configs)
 
 fname = fnames[53]
 nwb = h5.File(fname, 'r')
@@ -104,3 +108,47 @@ photostim_data1 = nwb['stimulus']['presentation']['photostimulus_1']['data'].val
 plt.plot(photostim_data1)
 photostim_data2 = nwb['stimulus']['presentation']['photostimulus_2']['data'].value
 plt.plot(photostim_data2)
+
+whisker_timeseries = nwb['processing']['whisker']['BehavioralTimeSeries']
+whisker_num = '1'
+distance_to_pole = whisker_timeseries['distance_to_pole_' + whisker_num]['data'].value.flatten()
+touch_offset = whisker_timeseries['touch_offset_' + whisker_num]['data'].value.flatten()
+touch_onset = whisker_timeseries['touch_onset_' + whisker_num]['data'].value.flatten()
+whisker_angle = whisker_timeseries['whisker_angle_' + whisker_num]['data'].value.flatten()
+whisker_curvature = whisker_timeseries['whisker_curvature_' + whisker_num]['data'].value.flatten()
+behavior_timestamps = whisker_timeseries['distance_to_pole_' + whisker_num]['timestamps'].value * 1e-3  # convert msec->second
+
+plt.plot(whisk_pos, 'g')
+plt.plot(whisk_pos*touch_on, '.', c='deepskyblue')
+
+plt.plot(behavior_timestamps*1e-3, whisker_angle)
+plt.plot(behavior_timestamps*1e-3, whisker_curvature)
+
+b_fs = 1 / np.median(np.diff(behavior_timestamps))
+
+# recreate matlab script
+twhisker = whisker_timeseries['distance_to_pole_' + whisker_num]['timestamps'].value
+diffwhiskertime = np.diff(twhisker)
+
+np.where(diffwhiskertime>1)
+
+index_whiskertrial_starts=np.hstack([0 , 1+np.where(diffwhiskertime>1)[0]]);
+index_whiskertrial_ends=np.hstack([1+np.where(diffwhiskertime>1)[0], len(twhisker)-1]);
+
+trial_whiskerstarts_1= twhisker[index_whiskertrial_starts];
+trial_whiskerends_1= twhisker[index_whiskertrial_ends];
+
+start_times = [v['start_time'].value for v in nwb['epochs'].values()]
+stop_times = [v['stop_time'].value for v in nwb['epochs'].values()]
+
+tr = 0
+print(f'{start_times[tr]} ; {stop_times[tr]}')
+print(f'{trial_whiskerstarts_1[tr]*1e-3} ; {trial_whiskerends_1[tr]*1e-3}')
+
+timeall = nwb['acquisition']['timeseries']['membrane_potential']['timestamps'].value
+
+fig1, ax1 = plt.subplots(1,1)
+ax1.plot(twhisker, '.')
+
+fig2, ax2 = plt.subplots(1,1)
+ax2.plot(timeall, '.')

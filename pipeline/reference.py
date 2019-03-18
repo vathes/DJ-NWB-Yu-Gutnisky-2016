@@ -12,20 +12,15 @@ class WholeCellDevice(dj.Lookup):
     device_name: varchar(32)
     ---
     device_desc = "": varchar(1024)
-    """   
+    """
 
 
 @schema
 class ProbeSource(dj.Lookup):
     definition = """
     probe_source: varchar(64)
-    ---
-    number_of_channels: int
     """
-    contents = [
-        ['Cambridge NeuroTech', 64],
-        ['NeuroNexus', 32]
-    ]
+    contents = zip(['Cambridge NeuroTech', 'NeuroNexus'])
 
 
 @schema
@@ -33,17 +28,26 @@ class Probe(dj.Lookup):
     definition = """ # Description of a particular model of probe.
     probe_name: varchar(128)      # String naming probe model
     channel_counts: smallint            # number of channels in the probe
+    ---
+    -> ProbeSource
+    probe_desc = "": varchar(1024)
     """
+
+    class Shank(dj.Part):
+        definition = """
+        -> master
+        shank_id: smallint  # the shank id of this probe this channel is located on 
+        """
 
     class Channel(dj.Part):
         definition = """
         -> master
         channel_id:         smallint     # id of a channel on the probe
         ---
+        -> Probe.Shank
         channel_x_pos:  float   # x position relative to the tip of the probe (um)
         channel_y_pos:  float   # y position relative to the tip of the probe (um)
         channel_z_pos:  float   # y position relative to the tip of the probe (um)
-        shank_id: smallint  # the shank id of this probe this channel is located on 
         """
 
 
