@@ -24,7 +24,7 @@ class PhotoStimDevice(dj.Lookup):
     
 
 @schema
-class PhotoStimulationProtocol(dj.Manual):
+class PhotoStimProtocol(dj.Manual):
     definition = """
     protocol: varchar(16)
     ---
@@ -45,14 +45,14 @@ class PhotoStimulation(dj.Manual):
     photostim_id: varchar(12)  # identification of this stimulation, in the scenario of multiple stimulations per session
     ---
     -> reference.ActionLocation
-    -> PhotoStimulationProtocol
+    -> PhotoStimProtocol
     photostim_timeseries=null: longblob  # (mW)
     photostim_timestamps=null: longblob  # (s) 
     """
 
 
 @schema
-class TrialPhotoStimInfo(dj.Imported):
+class TrialPhotoStimParam(dj.Imported):
     definition = """ # information related to the stimulation settings for this trial
     -> acquisition.TrialSet.Trial
     ---

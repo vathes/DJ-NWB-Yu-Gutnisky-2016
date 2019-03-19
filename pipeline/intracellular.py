@@ -87,26 +87,7 @@ class TrialSegmentedMembranePotential(dj.Computed):
     key_source = MembranePotential * acquisition.TrialSet * analysis.TrialSegmentationSetting
 
     def make(self, key):
-        # get event, pre/post stim duration
-        event_name, pre_stim_dur, post_stim_dur = (analysis.TrialSegmentationSetting & key).fetch1(
-            'event', 'pre_stim_duration', 'post_stim_duration')
-        # get raw
-        mp, timestamps = (MembranePotential & key).fetch1('membrane_potential', 'membrane_potential_timestamps')
-
-        # Limit to insert size of 15 per insert
-        trial_lists = utilities.split_list((acquisition.TrialSet.Trial & key).fetch('KEY'), utilities.insert_size)
-
-        for b_idx, trials in enumerate(trial_lists):
-            segmented_mp = [dict(trial_key,
-                                 segmented_mp=analysis.perform_trial_segmentation(trial_key, event_name,
-                                                                                  pre_stim_dur, post_stim_dur,
-                                                                                  mp, timestamps)
-                                 if not isinstance(analysis.get_event_time(event_name, trial_key,
-                                                                           return_exception=True), Exception) else None)
-                            for trial_key in trials]
-            self.insert({**key, **s} for s in segmented_mp if s['segmented_mp'] is not None)
-            print(f'Segmenting Membrane Potential: {b_idx * utilities.insert_size + len(trials)}/' +
-                  f'{(acquisition.TrialSet & key).fetch1("trial_counts")}')
+        return NotImplementedError
 
 
 @schema

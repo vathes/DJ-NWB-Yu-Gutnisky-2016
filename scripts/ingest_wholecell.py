@@ -17,9 +17,9 @@ fnames = np.hstack(glob.glob(os.path.join(dir_files[0], '*.nwb'))
 for fname in fnames:
     nwb = h5.File(fname, 'r')
     subject_info = {c: nwb['general']['subject'][c].value.decode('UTF-8')
-                    for c in ('description', 'sex', 'species', 'weight', 'age', 'genotype')}
+                    for c in ('subject_id', 'description', 'sex', 'species', 'weight', 'age', 'genotype')}
     # force subject_id to be lower-case for consistency
-    subject_info['subject_id'] = nwb['general']['subject'].get('subject_id').lower()
+    subject_info['subject_id'] = subject_info['subject_id'].lower()
 
     # dob and sex
     subject_info['sex'] = subject_info['sex'][0].upper()
@@ -233,7 +233,7 @@ for fname in fnames:
             acquisition.TrialSet.EventTime.insert((dict(trial_key, trial_event=k, event_time = v)
                                                    for k, v in events.items()),
                                                   ignore_extra_fields=True, allow_direct_insert=True)
-            stimulation.TrialPhotoStimInfo.insert1(dict(trial_key,
+            stimulation.TrialPhotoStimParam.insert1(dict(trial_key,
                                                         photo_stim_mode='_'.join(
                                                             trials['trial_type'][idx].split('_')[1:])),
                                                    ignore_extra_fields=True, allow_direct_insert=True)
@@ -274,7 +274,7 @@ for fname in fnames:
                                     photo_stim_method='laser',
                                     photo_stim_excitation_lambda=float(opto_excitation_lambda),
                                     photo_stim_notes=(f'{site} - {opto_descs}'))
-            stimulation.PhotoStimulationProtocol.insert1(photim_stim_protocol, skip_duplicates=True)
+            stimulation.PhotoStimProtocol.insert1(photim_stim_protocol, skip_duplicates=True)
 
             # -- PhotoStimulation
             stim_presentation = None

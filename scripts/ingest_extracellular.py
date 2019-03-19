@@ -113,10 +113,11 @@ for fname in fnames:
 
     # Probe-insertion
     # For this study all extracellular probe recordings are at the VPM of the thalamus
+    hemisphere = 'left'
     brain_location = {'brain_region': 'thalamus',
                       'brain_subregion': 'VPM',
                       'cortical_layer': 'N/A',
-                      'hemisphere': 'left'}
+                      'hemisphere': hemisphere}
     reference.BrainLocation.insert1(brain_location, skip_duplicates=True)
 
     with extracellular.ProbeInsertion.connection.transaction:
@@ -226,8 +227,8 @@ for fname in fnames:
             trial_detail = dict(start_time=trials['start_times'][idx],
                                 stop_time=trials['stop_times'][idx],
                                 trial_is_good=trials['good_trials'][idx],
-                                trial_type=re.match('Go|Nogo', trials['trial_type'][idx]).group(),
-                                trial_stim_present=True if trials['trial_response'][idx, -1] == 1 else False,
+                                trial_type=re.match('Go|Nogo', trials['trial_type'][idx]).group(),  # TODO: not correct, missing this info from data
+                                trial_stim_present=True if trials['trial_response'][idx, -1] == 1 else False,  # TODO: not correct, missing this info from data
                                 trial_response=trial_resp_options[np.where(trials['trial_response'][idx, :])[0][0]],
                                 pole_position=trials['pole_pos'][idx])
             # insert
@@ -248,7 +249,7 @@ for fname in fnames:
             acquisition.TrialSet.EventTime.insert((dict(trial_key, trial_event=k, event_time = v)
                                                    for k, v in events.items()),
                                                   ignore_extra_fields=True, allow_direct_insert=True)
-            stimulation.TrialPhotoStimInfo.insert1(dict(trial_key,
+            stimulation.TrialPhotoStimParam.insert1(dict(trial_key,
                                                         photo_stim_mode='_'.join(
                                                             trials['trial_type'][idx].split('_')[1:])),
                                                    ignore_extra_fields=True, allow_direct_insert=True)
@@ -289,7 +290,7 @@ for fname in fnames:
                                     photo_stim_method='laser',
                                     photo_stim_excitation_lambda=float(opto_excitation_lambda),
                                     photo_stim_notes=(f'{site} - {opto_descs}'))
-            stimulation.PhotoStimulationProtocol.insert1(photim_stim_protocol, skip_duplicates=True)
+            stimulation.PhotoStimProtocol.insert1(photim_stim_protocol, skip_duplicates=True)
 
             # -- PhotoStimulation
             stim_presentation = None
