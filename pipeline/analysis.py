@@ -75,9 +75,6 @@ def perform_trial_segmentation(trial_key, event_name, pre_stim_dur, post_stim_du
         fs = 1/np.median(np.diff(timestamps))
         # check if pre/post stim dur is within start/stop time, if not, pad with NaNs
         trial_start, trial_stop = (acquisition.TrialSet.Trial & trial_key).fetch1('start_time', 'stop_time')
-        # print(trial_key)
-        # print(event_time_point)
-        # print(trial_start)
         event_time_point = event_time_point + trial_start
 
         pre_stim_nan_count = 0
@@ -85,14 +82,9 @@ def perform_trial_segmentation(trial_key, event_name, pre_stim_dur, post_stim_du
         if event_time_point - pre_stim_dur < trial_start:
             pre_stim_nan_count = int((trial_start - (event_time_point - pre_stim_dur)) * fs)
             pre_stim_dur = event_time_point - trial_start
-            # print(f'Warning: Out of bound prestimulus duration, pad {pre_stim_nan_count} NaNs')
         if event_time_point + post_stim_dur > trial_stop:
             post_stim_nan_count = int((event_time_point + post_stim_dur - trial_stop) * fs)
             post_stim_dur = trial_stop - event_time_point
-            # print(f'Warning: Out of bound poststimulus duration, pad {post_stim_nan_count} NaNs')
-
-        # print(pre_stim_dur)
-        # print(post_stim_dur)
 
         segmented_data = data[np.logical_and((timestamps >= (event_time_point - pre_stim_dur)),
                                              (timestamps <= (event_time_point + post_stim_dur)))]
@@ -123,7 +115,6 @@ def get_event_time(event_name, key, return_exception=False):
 
 class EventChoiceError(Exception):
     '''Raise when "event" does not exist or "event_type" is invalid (e.g. nan)'''
-
     def __init__(self, event_name, msg=None):
         if msg is None:
             msg = f'Invalid event type or time for: {event_name}'
