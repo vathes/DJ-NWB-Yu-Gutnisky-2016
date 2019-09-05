@@ -138,7 +138,7 @@ class WhiskerConfig(dj.Lookup):
     whisker_config: varchar(32)
     """
     contents = zip(['full', 'beta', 'gamma',
-                    'B1', 'B2',
+                    'B1', 'B2', 'B3',
                     'C1', 'C2', 'C3',
                     'D1', 'D2', 'D3'])
        

@@ -152,3 +152,23 @@ ax1.plot(twhisker, '.')
 
 fig2, ax2 = plt.subplots(1,1)
 ax2.plot(timeall, '.')
+
+# =======================
+import pickle
+import hashlib
+
+d = intracellular.UnitSpikeTimes.fetch(as_dict=True, limit=1)[0]
+
+d_pkl = pickle.dumps(d)
+
+d_hash = hashlib.md5(d_pkl).hexdigest()
+
+schema = dj.schema(dj.config['custom']['database.prefix'] + 'analysis')
+
+@schema
+class Timer(dj.Manual):
+    definition = """
+    id: smallint
+    entry_time = CURRENT_TIMESTAMP: timestamp
+    """
+
