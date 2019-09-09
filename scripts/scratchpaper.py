@@ -171,4 +171,114 @@ class Timer(dj.Manual):
     id: smallint
     entry_time = CURRENT_TIMESTAMP: timestamp
     """
+# -------------------------------------
+import re
+
+fake_match = 'Houston  Chronicle; Business & Finance'
+begin_strings = ['The', 'A', 'And', '0']
+end_strings = ['Co', 'Comp', 'LLC']
+connecting_words = ['and', 'or', 'for', 'of']
+
+def match_and_check_results(orig_s, option_list):
+    if orig_s in option_list:
+        return orig_s
+    return None
+
+
+def get_option_list(search_string):
+    return []
+
+
+orig_s = 'Houston Chronicle Business And Finance'
+search_string = orig_s
+found = None
+
+and_swap = False  # and <-> &
+while not found:
+    print(search_string)
+    # get the option list
+    options = get_option_list(search_string)
+
+    # try to match the returned list of results
+    matched_s = match_and_check_results(orig_s, options)
+    if matched_s:
+        found = matched_s
+        break
+
+    if len(search_string.split()) == 1:
+        break
+
+    # Remove begin-filter and end-filter words
+    # Remove special characters
+
+    # Swap & <-> And
+    if not and_swap:
+        if re.search('and', search_string, flags=re.I):
+            search_string = re.sub('and', '&', search_string, flags=re.I)
+            and_swap = True
+        elif re.search('&', search_string):
+            search_string = re.sub('&', 'And', search_string)
+            and_swap = True
+        else:
+            and_swap = True
+    else:
+        # remove trailing connecting words
+        re_s = '|'.join([r'\s' + w + r'$' for w in connecting_words])
+        search_string = re.sub(re_s, '', search_string)
+        # remove the last word
+        search_string = ''.join(search_string.split()[:-1])
+
+# Go the reverse direction
+search_string = orig_s
+and_swap = False  # and <-> &
+while not found:
+    print(search_string)
+    # get the option list
+    options = get_option_list(search_string)
+
+    # try to match the returned list of results
+    matched_s = match_and_check_results(orig_s, options)
+    if matched_s:
+        found = matched_s
+        break
+
+    if len(search_string.split()) == 1:
+        break
+
+    # Remove begin-filter and end-filter words
+    # Remove special characters
+
+    # Swap & <-> And
+    if not and_swap:
+        if re.search('and', search_string, flags=re.I):
+            search_string = re.sub('and', '&', search_string, flags=re.I)
+            and_swap = True
+        elif re.search('&', search_string):
+            search_string = re.sub('&', 'And', search_string)
+            and_swap = True
+        else:
+            and_swap = True
+    else:
+        # remove trailing connecting words
+        re_s = '|'.join([r'\s' + w + r'$' for w in connecting_words])
+        search_string = re.sub(re_s, '', search_string)
+        # remove the first word
+        search_string = ''.join(search_string.split()[1:])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

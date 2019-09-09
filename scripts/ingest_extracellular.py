@@ -165,12 +165,11 @@ for fname in fnames:
                 ignore_extra_fields=True, skip_duplicates=True)
 
     # ==================== Behavior ====================
-    acq_tstart = nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value[0]
 
     behavior.LickTrace.insert1(dict(
         sess_key,
         lick_trace=nwb['acquisition']['timeseries']['lick_trace']['data'].value,
-        lick_trace_timestamps=nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value - acq_tstart),
+        lick_trace_timestamps=nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value),
         skip_duplicates=True, allow_direct_insert=True)
 
     whisker_timeseries = nwb['processing']['whisker']['BehavioralTimeSeries']
@@ -197,7 +196,7 @@ for fname in fnames:
                 touch_onset=whisker_timeseries['touch_onset_' + whisker_num]['data'].value.flatten(),
                 whisker_angle=whisker_timeseries['whisker_angle_' + whisker_num + '_whisker']['data'].value.flatten(),
                 whisker_curvature=whisker_timeseries['whisker_curvature_' + whisker_num + '_whisker']['data'].value.flatten(),
-                behavior_timestamps=whisker_timeseries['touch_onset_' + whisker_num]['timestamps'].value * 1e-3),  # convert msec->second
+                behavior_timestamps=whisker_timeseries['touch_onset_' + whisker_num]['timestamps'].value),
                 skip_duplicates=True, allow_direct_insert=True)
             print(f'Ingest whisker data: {whisker_config} - Principal: {whisker_config == principal_whisker}')
 
@@ -215,11 +214,11 @@ for fname in fnames:
                   pole_out_times=nwb['stimulus']['presentation']['pole_out']['timestamps'].value)
 
     lick_times = (nwb['acquisition']['timeseries']['lick_trace']['data'].value *
-                  (nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value - acq_tstart))
+                  (nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value))
     lick_times = lick_times[lick_times != 0]
     touch_times = (nwb['processing']['whisker']['BehavioralTimeSeries']['touch_onset_' + principal_whisker_num]['data'].value.flatten() *
                    nwb['processing']['whisker']['BehavioralTimeSeries']['touch_onset_' + principal_whisker_num]['timestamps'].value.flatten())
-    touch_times = touch_times[touch_times != 0] * 1e-3  # convert ms -> s (behav data timestamps are in millisecond)
+    touch_times = touch_times[touch_times != 0]# convert ms -> s (behav data timestamps are in millisecond)
 
     # form new key-values pair and insert key
     trial_set = dict(sess_key, trial_counts=len(trials['trial_names']))
