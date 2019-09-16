@@ -50,7 +50,7 @@ class MembranePotential(dj.Imported):
 
 @schema
 class CurrentInjection(dj.Imported):
-    definition = """ # Membrane potential recording from a cell
+    definition = """ # Current injection recording from a cell
     -> Cell
     ---
     current_injection: longblob  # (mV)
@@ -63,7 +63,7 @@ class CurrentInjection(dj.Imported):
 
 @schema
 class UnitSpikeTimes(dj.Imported):
-    definition = """ # Spike-train recording of this Cell
+    definition = """ # Spike times of this Cell
     -> Cell
     unit_id: smallint
     ---

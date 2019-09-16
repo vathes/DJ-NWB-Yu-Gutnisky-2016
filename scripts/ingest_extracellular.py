@@ -1,21 +1,23 @@
 import os
 import re
-
+import pathlib
 import h5py as h5
 import numpy as np
 from decimal import Decimal
 from tqdm import tqdm
 import glob
-
 import datajoint as dj
+from collections.abc import Iterable
+
 from pipeline import (reference, subject, acquisition, extracellular, behavior, stimulation, virus, utilities)
 
-path = os.path.join('.', 'data', 'data')
+path = pathlib.Path(dj.config['custom'].get('data_directory')).as_posix()
 fnames = np.hstack(glob.glob(os.path.join(dir_files[0], '*.nwb'))
                    if len(dir_files[1]) == 0 and dir_files[0].find('VPM_silicon_probe') != -1 else []
                    for dir_files in os.walk(path))
 
 for fname in fnames:
+    print(f'Reading {fname}...')
     nwb = h5.File(fname, 'r')
     subject_info = {c: nwb['general']['subject'][c].value.decode('UTF-8')
                     for c in ('description', 'sex', 'species', 'weight', 'age', 'genotype')}
@@ -150,25 +152,24 @@ for fname in fnames:
                                         for v in extracellular_units['UnitTimes']['cell_types'].value
                                         if v.decode('UTF-8').find(unit) != -1]),
                      spike_times=extracellular_units['UnitTimes'][unit]['times'].value),
-                ignore_extra_fields=True)
+                ignore_extra_fields=True, skip_duplicates=True)
             extracellular.UnitSpikeTimes.UnitChannel.insert(
                 (dict({**ec_probe, **sess_key}, unit_id=unit_id, channel_id=chn)
                  for chn in extracellular_units['EventWaveform'][unit]['electrode_idx'].value),
-                ignore_extra_fields=True)
+                ignore_extra_fields=True, skip_duplicates=True)
             extracellular.UnitSpikeTimes.SpikeWaveform.insert(
                 (dict({**ec_probe, **sess_key}, unit_id = unit_id, channel_id = chn,
                       spike_waveform=waveform)
                  for chn, waveform in zip(extracellular_units['EventWaveform'][unit]['electrode_idx'].value,
                                           extracellular_units['EventWaveform'][unit]['data'].value.transpose((2,0,1)))),
-                ignore_extra_fields=True)
+                ignore_extra_fields=True, skip_duplicates=True)
 
     # ==================== Behavior ====================
-    acq_tstart = nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value[0]
 
     behavior.LickTrace.insert1(dict(
         sess_key,
         lick_trace=nwb['acquisition']['timeseries']['lick_trace']['data'].value,
-        lick_trace_timestamps=nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value - acq_tstart),
+        lick_trace_timestamps=nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value),
         skip_duplicates=True, allow_direct_insert=True)
 
     whisker_timeseries = nwb['processing']['whisker']['BehavioralTimeSeries']
@@ -176,7 +177,10 @@ for fname in fnames:
     whisker_configs = ([wk.decode('UTF-8') for wk in nwb["general"]["whisker_configuration"].value]
                        if nwb["general"]["whisker_configuration"].value.shape
                        else [wk for wk in nwb["general"]["whisker_configuration"].value.decode('UTF-8').split(',')])
-    principal_whisker, principal_whisker_num = whisker_configs[int(nwb['analysis']['principal_whisker'].value[0])-1], '1'
+    principal_whisker_idx = int(nwb['analysis']['principal_whisker'].value[0]
+                                if isinstance(nwb['analysis']['principal_whisker'].value, Iterable)
+                                else nwb['analysis']['principal_whisker'].value)
+    principal_whisker, principal_whisker_num = whisker_configs[principal_whisker_idx-1], '1'
 
     print(f'Whiskers: {whisker_configs} - Principal: {principal_whisker}')
     for whisker_config, whisker_num in zip(whisker_configs,
@@ -190,14 +194,13 @@ for fname in fnames:
                 block_mask=whisker_timeseries['block_mask_' + whisker_num]['data'].value.flatten(),
                 touch_offset=whisker_timeseries['touch_offset_' + whisker_num]['data'].value.flatten(),
                 touch_onset=whisker_timeseries['touch_onset_' + whisker_num]['data'].value.flatten(),
-                whisker_angle=whisker_timeseries['whisker_angle_' + whisker_num]['data'].value.flatten(),
-                whisker_curvature=whisker_timeseries['whisker_curvature_' + whisker_num]['data'].value.flatten(),
-                behavior_timestamps=whisker_timeseries['touch_onset_' + whisker_num]['timestamps'].value * 1e-3),  # convert msec->second
+                whisker_angle=whisker_timeseries['whisker_angle_' + whisker_num + '_whisker']['data'].value.flatten(),
+                whisker_curvature=whisker_timeseries['whisker_curvature_' + whisker_num + '_whisker']['data'].value.flatten(),
+                behavior_timestamps=whisker_timeseries['touch_onset_' + whisker_num]['timestamps'].value),
                 skip_duplicates=True, allow_direct_insert=True)
             print(f'Ingest whisker data: {whisker_config} - Principal: {whisker_config == principal_whisker}')
 
     # ==================== Trials ====================
-    trial_resp_options = [k.decode('UTF-8') for k in nwb['analysis']['trial_type_string'].value.flatten()]
     # -- read trial-related info -- nwb['epochs'], nwb['analysis'], nwb['stimulus']['presentation'])
     trials = dict(trial_names=[tr for tr in nwb['epochs']],
                   trial_type=[nwb['epochs'][v]['tags'].value[0].decode('UTF-8') for v in nwb['epochs']],
@@ -211,11 +214,11 @@ for fname in fnames:
                   pole_out_times=nwb['stimulus']['presentation']['pole_out']['timestamps'].value)
 
     lick_times = (nwb['acquisition']['timeseries']['lick_trace']['data'].value *
-                  (nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value - acq_tstart))
+                  (nwb['acquisition']['timeseries']['lick_trace']['timestamps'].value))
     lick_times = lick_times[lick_times != 0]
     touch_times = (nwb['processing']['whisker']['BehavioralTimeSeries']['touch_onset_' + principal_whisker_num]['data'].value.flatten() *
                    nwb['processing']['whisker']['BehavioralTimeSeries']['touch_onset_' + principal_whisker_num]['timestamps'].value.flatten())
-    touch_times = touch_times[touch_times != 0] * 1e-3  # convert ms -> s (behav data timestamps are in millisecond)
+    touch_times = touch_times[touch_times != 0]# convert ms -> s (behav data timestamps are in millisecond)
 
     # form new key-values pair and insert key
     trial_set = dict(sess_key, trial_counts=len(trials['trial_names']))
@@ -227,9 +230,9 @@ for fname in fnames:
             trial_detail = dict(start_time=trials['start_times'][idx],
                                 stop_time=trials['stop_times'][idx],
                                 trial_is_good=trials['good_trials'][idx],
-                                trial_type=re.match('Go|Nogo', trials['trial_type'][idx]).group(),  # TODO: not correct, missing this info from data
-                                trial_stim_present=True if trials['trial_response'][idx, -1] == 1 else False,  # TODO: not correct, missing this info from data
-                                trial_response=trial_resp_options[np.where(trials['trial_response'][idx, :])[0][0]],
+                                trial_type='Go' if trials['trial_type'][idx] in ('Hit', 'Miss') else 'NoGo',
+                                trial_stim_present=False,  # no photostim info found in data -> default to False
+                                trial_response=trials['trial_type'][idx],
                                 pole_position=trials['pole_pos'][idx])
             # insert
             acquisition.TrialSet.Trial.insert1({**trial_key, **trial_detail}, ignore_extra_fields=True, skip_duplicates=True, allow_direct_insert=True)
@@ -249,10 +252,7 @@ for fname in fnames:
             acquisition.TrialSet.EventTime.insert((dict(trial_key, trial_event=k, event_time = v)
                                                    for k, v in events.items()),
                                                   ignore_extra_fields=True, allow_direct_insert=True)
-            stimulation.TrialPhotoStimParam.insert1(dict(trial_key,
-                                                        photo_stim_mode='_'.join(
-                                                            trials['trial_type'][idx].split('_')[1:])),
-                                                   ignore_extra_fields=True, allow_direct_insert=True)
+
 
     # ==================== Photo stimulation ====================
     if 'optogenetics' in nwb['general']:
