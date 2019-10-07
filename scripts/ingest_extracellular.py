@@ -191,7 +191,7 @@ for fname in fnames:
             behavior.Whisker.insert1(dict(
                 whisker_key,
                 principal_whisker=(whisker_config == principal_whisker),
-                block_mask=whisker_timeseries['block_mask_' + whisker_num]['data'].value.flatten(),
+                pole_available=whisker_timeseries['block_mask_' + whisker_num]['data'].value.flatten(),
                 touch_offset=whisker_timeseries['touch_offset_' + whisker_num]['data'].value.flatten(),
                 touch_onset=whisker_timeseries['touch_onset_' + whisker_num]['data'].value.flatten(),
                 whisker_angle=whisker_timeseries['whisker_angle_' + whisker_num + '_whisker']['data'].value.flatten(),
@@ -218,7 +218,7 @@ for fname in fnames:
     lick_times = lick_times[lick_times != 0]
     touch_times = (nwb['processing']['whisker']['BehavioralTimeSeries']['touch_onset_' + principal_whisker_num]['data'].value.flatten() *
                    nwb['processing']['whisker']['BehavioralTimeSeries']['touch_onset_' + principal_whisker_num]['timestamps'].value.flatten())
-    touch_times = touch_times[touch_times != 0]# convert ms -> s (behav data timestamps are in millisecond)
+    touch_times = touch_times[touch_times != 0]  # convert ms -> s (behav data timestamps are in millisecond)
 
     # form new key-values pair and insert key
     trial_set = dict(sess_key, trial_counts=len(trials['trial_names']))

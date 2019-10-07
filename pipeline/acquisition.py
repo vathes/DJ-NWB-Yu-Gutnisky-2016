@@ -65,7 +65,7 @@ class TrialSet(dj.Imported):
         -> reference.TrialType
         -> reference.TrialResponse
         trial_stim_present: bool  # is this a stim or no-stim trial
-        pole_position=null: float  # (um)  the location of the pole along the anteroposterior axis of the animal
+        pole_position=null: float  # (mm) the location of the pole along the anteroposterior axis of the animal
         """
         
     class EventTime(dj.Part):
@@ -73,7 +73,7 @@ class TrialSet(dj.Imported):
         -> master.Trial
         -> reference.ExperimentalEvent.proj(trial_event="event")
         ---
-        event_time=null: float   # (in second) event time with respect to this session's start time
+        event_time=null: float   # (in second) event time with respect to this trial's start time
         """
 
     def make(self, key):
