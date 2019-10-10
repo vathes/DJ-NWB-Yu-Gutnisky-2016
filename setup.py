@@ -11,6 +11,5 @@ setup(
     author='Vathes',
     author_email='support@vathes.com',
     packages=find_packages(exclude=[]),
-    install_requires=['datajoint'],
-    scripts=['scripts/yg2016-shell.py'],
+    install_requires=['datajoint']
 )

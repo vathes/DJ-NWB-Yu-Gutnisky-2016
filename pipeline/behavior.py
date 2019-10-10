@@ -32,7 +32,7 @@ class Whisker(dj.Imported):
     """
 
     def make(self, key):
-        print(f'Inserted behavioral data for session: {key["session_id"]}')
+        raise NotImplementedError
 
 
 @schema
