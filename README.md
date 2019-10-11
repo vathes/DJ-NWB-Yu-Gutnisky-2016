@@ -1,5 +1,4 @@
-# Yu, Gutnisky et al., 
-2016 - A DataJoint example
+# Yu, Gutnisky et al., 2016 - A DataJoint example
 This notebook presents data and results associated with the following papers:
 
 >Jianing Yu, Diego A Gutnisky, S Andrew Hires & Karel Svoboda1. "Layer 4 fast-spiking interneurons filter thalamocortical signals during active somatosensation" (2016) Nat Neurosci (https://dx.doi.org/10.1038/nn.4412)
