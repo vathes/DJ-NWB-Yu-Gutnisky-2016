@@ -22,18 +22,17 @@ class Whisker(dj.Imported):
     -> acquisition.Session
     -> reference.WhiskerConfig
     ---
-    principal_whisker=0: bool  # is this the principal whisker
-    distance_to_pole=null: longblob  #
-    block_mask=null: longblob  #
-    touch_offset=null: longblob  #
-    touch_onset=null: longblob  #
-    whisker_angle=null: longblob  #
-    whisker_curvature=null: longblob  #
-    behavior_timestamps=null: longblob  # (s)
+    principal_whisker=0: bool           #  is this the principal whisker
+    pole_available=null: longblob       #  binary array of time when the pole is within reach of the whisker
+    touch_offset=null: longblob         #  binary array of all touch offset times (1 = offset) 
+    touch_onset=null: longblob          #  binary array of all touch onset times (1 = onset)
+    whisker_angle=null: longblob        #  (degree) the angle of the whisker relative to medialateral axis of the animal
+    whisker_curvature=null: longblob    #  the change in whisker curvature
+    behavior_timestamps=null: longblob  #  (s)
     """
 
     def make(self, key):
-        print(f'Inserted behavioral data for session: {key["session_id"]}')
+        raise NotImplementedError
 
 
 @schema

@@ -45,9 +45,9 @@ class Probe(dj.Lookup):
         channel_id:         smallint     # id of a channel on the probe
         ---
         -> Probe.Shank
-        channel_x_pos:  float   # x position relative to the tip of the probe (um)
-        channel_y_pos:  float   # y position relative to the tip of the probe (um)
-        channel_z_pos:  float   # y position relative to the tip of the probe (um)
+        channel_x_pos:  float   # x position relative to the tip of the probe (m)
+        channel_y_pos:  float   # y position relative to the tip of the probe (m)
+        channel_z_pos:  float   # y position relative to the tip of the probe (m)
         """
 
 
