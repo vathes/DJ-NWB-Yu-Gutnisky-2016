@@ -1,4 +1,4 @@
-# Yu-Gutnisky-2016 - A DataJoint example
+# Yu, Gutnisky et al., 2016 - A DataJoint example
 This notebook presents data and results associated with the following papers:
 
 >Jianing Yu, Diego A Gutnisky, S Andrew Hires & Karel Svoboda1. "Layer 4 fast-spiking interneurons filter thalamocortical signals during active somatosensation" (2016) Nat Neurosci (https://dx.doi.org/10.1038/nn.4412)
@@ -21,8 +21,11 @@ Data are also exported into NWB 2.0 format.
 This repository will contain the Python 3.6+ code of the DataJoint data pipeline design for this dataset, as well as scripts for data ingestions and visualization
 
 ## Conversion to NWB 2.0
-This repository will contain the Python 3.6+ code to convert the DataJoint pipeline into NWB 2.0 format (See https://neurodatawithoutborders.github.io/)
+This repository will contain the Python 3.6+ code to convert the DataJoint pipeline into NWB 2.0 format (See https://neurodatawithoutborders.github.io/)s
 See NWB export code [here](../scripts/datajoint_to_nwb.py)
+
+## Demonstration of the data pipeline
+Data queries and usages are demonstrated in this [Jupyter Notebook](notebooks/Yu-Gutnisky-2016-examples.ipynb), where several figures from the paper are reproduced. 
 
 ## Data Pipeline Architecture
 ![ERD of the entire data pipeline](images/all_erd.png)
