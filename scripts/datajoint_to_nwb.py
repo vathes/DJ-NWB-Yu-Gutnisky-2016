@@ -11,6 +11,7 @@ import pandas as pd
 import warnings
 import tqdm
 
+
 from pipeline import (reference, subject, acquisition, stimulation, analysis,
                       intracellular, extracellular, behavior, utilities)
 import pynwb
@@ -145,7 +146,7 @@ def export_to_nwb(session_key, nwb_output_dir=default_nwb_output_dir, save=False
             # add unit
             nwbfile.add_unit(id=unit['unit_id'],
                              electrodes=np.where(np.in1d(np.array(nwbfile.electrodes.id.data), unit_chn))[0],
-                             obs_intervals = obs_intervals,
+                             obs_intervals=obs_intervals,
                              sampling_rate=ecephys_fs,
                              cell_desc=unit['cell_desc'],
                              spike_times=unit['spike_times'],
@@ -180,15 +181,16 @@ def export_to_nwb(session_key, nwb_output_dir=default_nwb_output_dir, save=False
             behavior_descriptions = {attr: re.search(f'(?<={attr})(.*)#(.*)',
                                                      str(behavior.Whisker.heading)).groups()[-1].strip()
                                      for attr in whisker_data}
+            behavior_units = {k: re.match('\(.+\)', v)
+                              for k, v in behavior_descriptions.items()}
 
             for b_k, b_v in whisker_data.items():
-                b_v = b_v.astype(bool) if b_v is not None and b_k in ['pole_available', 'touch_offset', 'touch_onset'] else b_v
                 behav_acq.create_timeseries(
                     name=b_k,
                     description=behavior_descriptions[b_k],
-                    unit='a.u.',
+                    unit=behavior_units[b_k].group() if behavior_units[b_k] else 'a.u.',
                     conversion=1.0,
-                    data=b_v,
+                    data = b_v.astype(bool) if 'binary array' in behavior_descriptions[b_k] else b_v,
                     timestamps=timestamps)
 
     # =============== Photostimulation ====================
