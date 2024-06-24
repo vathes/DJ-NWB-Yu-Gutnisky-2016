@@ -11,6 +11,7 @@ import pandas as pd
 import warnings
 import tqdm
 
+
 from pipeline import (reference, subject, acquisition, stimulation, analysis,
                       intracellular, extracellular, behavior, utilities)
 import pynwb
@@ -21,7 +22,7 @@ warnings.filterwarnings('ignore', module='pynwb')
 # ============================== SET CONSTANTS ==========================================
 default_nwb_output_dir = os.path.join('data', 'NWB 2.0')
 zero_zero_time = datetime.strptime('00:00:00', '%H:%M:%S').time()  # no precise time available
-hardware_filter = ''
+hardware_filter = 'N/A'
 institution = 'Janelia Research Campus'
 related_publications = 'doi:10.1038/nn.4412'
 ecephys_fs = 19531.25
@@ -77,23 +78,22 @@ def export_to_nwb(session_key, nwb_output_dir=default_nwb_output_dir, save=False
         # acquisition - membrane potential
         mp, mp_timestamps = (intracellular.MembranePotential & cell).fetch1(
             'membrane_potential', 'membrane_potential_timestamps')
-        nwbfile.add_acquisition(pynwb.icephys.PatchClampSeries(name='PatchClampSeries',
-                                                               electrode=ic_electrode,
-                                                               unit='mV',
-                                                               conversion=1.0,
-                                                               gain=1.0,
-                                                               data=mp,
-                                                               timestamps=mp_timestamps))
+        nwbfile.add_acquisition(pynwb.icephys.CurrentClampSeries(name='CurrentClampSeries',
+                                                                 electrode=ic_electrode,
+                                                                 conversion=1e-3,
+                                                                 gain=1.0,
+                                                                 data=mp[mp_timestamps >= 0],
+                                                                 timestamps=mp_timestamps[mp_timestamps >= 0]))
         # acquisition - current injection
-        if (intracellular.CurrentInjection & cell):
+        if intracellular.CurrentInjection & cell:
             current_injection, ci_timestamps = (intracellular.CurrentInjection & cell).fetch1(
                 'current_injection', 'current_injection_timestamps')
             nwbfile.add_stimulus(pynwb.icephys.CurrentClampStimulusSeries(name='CurrentClampStimulus',
                                                                           electrode=ic_electrode,
                                                                           conversion=1e-6,
                                                                           gain=1.0,
-                                                                          data=current_injection,
-                                                                          timestamps=ci_timestamps))
+                                                                          data=current_injection[ci_timestamps >= 0],
+                                                                          timestamps=ci_timestamps[ci_timestamps >= 0]))
 
     # =============== Extracellular ====================
     probe_insertion = ((extracellular.ProbeInsertion & session_key).fetch1()
@@ -103,20 +103,23 @@ def export_to_nwb(session_key, nwb_output_dir=default_nwb_output_dir, save=False
         probe = nwbfile.create_device(name=probe_insertion['probe_name'])
         electrode_group = nwbfile.create_electrode_group(
             name='; '.join([f'{probe_insertion["probe_name"]}: {str(probe_insertion["channel_counts"])}']),
-            description = 'N/A',
-            device = probe,
-            location = '; '.join([f'{k}: {str(v)}' for k, v in
+            description='N/A',
+            device=probe,
+            location='; '.join([f'{k}: {str(v)}' for k, v in
                                   (reference.BrainLocation & (extracellular.ProbeInsertion.InsertLocation
                                    & probe_insertion)).fetch1().items()]))
-
-        for chn in (reference.Probe.Channel & probe_insertion).fetch(as_dict=True):
+        q_channels = (reference.Probe.Channel * extracellular.ProbeInsertion.InsertLocation
+                      * reference.ActionLocation & probe_insertion).proj(
+            x='-1 * coordinate_ap', y='coordinate_dv - channel_z_pos*1e6', z='coordinate_ml')
+        for chn in q_channels.fetch(as_dict=True):
             nwbfile.add_electrode(id=chn['channel_id'],
                                   group=electrode_group,
                                   filtering=hardware_filter,
-                                  imp=-1.,
-                                  x=chn['channel_x_pos'],
-                                  y=chn['channel_y_pos'],
-                                  z=chn['channel_z_pos'],
+                                  imp=np.nan,
+                                  x=float(chn['x']),
+                                  y=float(chn['y']),
+                                  z=float(chn['z']) if chn['hemisphere'] == 'right' else -1 * float(chn['z']),
+                                  reference=chn['coordinate_ref'],
                                   location=electrode_group.location)
 
         # --- unit spike times ---
@@ -130,8 +133,23 @@ def export_to_nwb(session_key, nwb_output_dir=default_nwb_output_dir, save=False
             wfs_sd = np.vstack([wf.std(axis=0) for wf in wfs]).T
 
             # make an electrode table region (which electrode(s) is this unit coming from)
+            unit_chn = (extracellular.UnitSpikeTimes.UnitChannel & unit).fetch('channel_id')
+
+            # build observation intervals: note the early trials where spikes were not recorded
+            first_spike, last_spike = unit['spike_times'][0], unit['spike_times'][-1]
+
+            obs_start = (acquisition.TrialSet.Trial & unit & f'start_time < {first_spike}').fetch(
+                'start_time', order_by='start_time DESC', limit=1)
+            obs_stop = (acquisition.TrialSet.Trial & unit & f'stop_time > {last_spike}').fetch(
+                'stop_time', order_by='stop_time', limit=1)
+
+            obs_intervals = [[float(obs_start[0]) if obs_start.size > 0 else first_spike,
+                              float(obs_stop[0]) if obs_stop.size > 0 else last_spike]]
+
+            # add unit
             nwbfile.add_unit(id=unit['unit_id'],
-                             electrodes=(extracellular.UnitSpikeTimes.UnitChannel & unit).fetch('channel_id') - 1,
+                             electrodes=np.where(np.in1d(np.array(nwbfile.electrodes.id.data), unit_chn))[0],
+                             obs_intervals=obs_intervals,
                              sampling_rate=ecephys_fs,
                              cell_desc=unit['cell_desc'],
                              spike_times=unit['spike_times'],
@@ -150,8 +168,9 @@ def export_to_nwb(session_key, nwb_output_dir=default_nwb_output_dir, save=False
         for b_k, b_v in lick_trace_data.items():
             behav_acq.create_timeseries(name=b_k,
                                         unit='a.u.',
+                                        description="Binary array of the animal's lick trace",
                                         conversion=1.0,
-                                        data=b_v,
+                                        data=b_v.astype(bool),
                                         timestamps=timestamps)
 
     if behavior.Whisker & session_key:
@@ -165,14 +184,18 @@ def export_to_nwb(session_key, nwb_output_dir=default_nwb_output_dir, save=False
             behavior_descriptions = {attr: re.search(f'(?<={attr})(.*)#(.*)',
                                                      str(behavior.Whisker.heading)).groups()[-1].strip()
                                      for attr in whisker_data}
+            behavior_units = {k: re.match('\(.+\)', v)
+                              for k, v in behavior_descriptions.items()}
 
             for b_k, b_v in whisker_data.items():
-                behav_acq.create_timeseries(name=b_k,
-                                            description=behavior_descriptions[b_k],
-                                            unit='a.u.',
-                                            conversion=1.0,
-                                            data=b_v,
-                                            timestamps=timestamps)
+                if b_v is not None:
+                    behav_acq.create_timeseries(
+                        name=b_k,
+                        description=behavior_descriptions[b_k],
+                        unit=behavior_units[b_k].group() if behavior_units[b_k] else 'a.u.',
+                        conversion=1.0,
+                        data = b_v.astype(bool) if 'binary array' in behavior_descriptions[b_k] else b_v,
+                        timestamps=timestamps)
 
     # =============== Photostimulation ====================
     if stimulation.PhotoStimulation & session_key:

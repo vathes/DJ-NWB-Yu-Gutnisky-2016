@@ -249,7 +249,7 @@ for fname in fnames:
                           pole_pos=trials['pole_pos_time'][idx] - trial_detail['start_time'],
                           first_lick=trial_lick_times[0] - trial_detail['start_time'] if trial_lick_times.size else np.nan,
                           first_touch=trial_touch_times[0] - trial_detail['start_time'] if trial_touch_times.size else np.nan)
-            acquisition.TrialSet.EventTime.insert((dict(trial_key, trial_event=k, event_time = v)
+            acquisition.TrialSet.EventTime.insert((dict(trial_key, trial_event=k, event_time=v)
                                                    for k, v in events.items()),
                                                   ignore_extra_fields=True, allow_direct_insert=True)
 
